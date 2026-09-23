@@ -39,7 +39,7 @@ export function AnnouncementDialog({ open, onOpenChange, onSuccess }: Announceme
 
   async function handleSubmit() {
     if (!title.trim() || !message.trim()) {
-      toast("Please fill in title and message", "error")
+      toast("Please fill in title and message", { variant: "destructive" })
       return
     }
 
@@ -59,11 +59,11 @@ export function AnnouncementDialog({ open, onOpenChange, onSuccess }: Announceme
     setSaving(false)
 
     if (error) {
-      toast("Failed to create announcement: " + error.message, "error")
+      toast("Failed to create announcement: " + error.message, { variant: "destructive" })
       return
     }
 
-    toast("Announcement published", "success")
+    toast("Announcement published", { variant: "success" })
     setTitle("")
     setMessage("")
     setPriority("medium")

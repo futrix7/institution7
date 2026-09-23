@@ -97,13 +97,13 @@ export default function StudentCertificates() {
   const issued = certificates.filter((c) => c.status === "Issued").length
 
   const handleDownload = (name: string) => {
-    toast(`Downloading ${name}...`, "success")
+    toast(`Downloading ${name}...`, { variant: "success" })
   }
 
   const handleRequest = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
-      toast("Please log in", "error")
+      toast("Please log in", { variant: "destructive" })
       return
     }
 
@@ -114,7 +114,7 @@ export default function StudentCertificates() {
       .single()
 
     if (!student) {
-      toast("Student profile not found", "error")
+      toast("Student profile not found", { variant: "destructive" })
       return
     }
 
@@ -130,11 +130,11 @@ export default function StudentCertificates() {
     })
 
     if (error) {
-      toast("Failed to submit request: " + error.message, "error")
+      toast("Failed to submit request: " + error.message, { variant: "destructive" })
       return
     }
 
-    toast(`Certificate request submitted for ${reqType}`, "success")
+    toast(`Certificate request submitted for ${reqType}`, { variant: "success" })
     setReqOpen(false)
     setReqType("Completion")
     setReqNotes("")

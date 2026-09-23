@@ -240,12 +240,12 @@ export default function AdminStudentsPage() {
               {paginatedStudents.map((student) => (
                 <TableRow key={student.id} className="cursor-pointer hover:bg-muted/50">
                   <TableCell className="font-mono text-xs">
-                    <Link href={`/admin/student/${student.id}`} className="block">
+                    <Link href={`/admin/student/${student.id}/profile`} className="block">
                       {student.id}
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <Link href={`/admin/student/${student.id}`} className="flex items-center gap-3">
+                    <Link href={`/admin/student/${student.id}/profile`} className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">
                         {student.name
                           .split(" ")
@@ -262,12 +262,12 @@ export default function AdminStudentsPage() {
                     </Link>
                   </TableCell>
                   <TableCell className="hidden md:table-cell text-muted-foreground">
-                    <Link href={`/admin/student/${student.id}`} className="block">
+                    <Link href={`/admin/student/${student.id}/profile`} className="block">
                       {student.course}
                     </Link>
                   </TableCell>
                   <TableCell className="hidden lg:table-cell text-muted-foreground">
-                    <Link href={`/admin/student/${student.id}`} className="block">
+                    <Link href={`/admin/student/${student.id}/profile`} className="block">
                       {student.branch}
                     </Link>
                   </TableCell>
@@ -278,7 +278,7 @@ export default function AdminStudentsPage() {
                     </div>
                   </TableCell>
                   <TableCell className="hidden lg:table-cell text-muted-foreground">
-                    <Link href={`/admin/student/${student.id}`} className="block">
+                    <Link href={`/admin/student/${student.id}/profile`} className="block">
                       {student.enrollmentDate}
                     </Link>
                   </TableCell>
@@ -288,7 +288,7 @@ export default function AdminStudentsPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Link href={`/admin/student/${student.id}`}>
+                    <Link href={`/admin/student/${student.id}/profile`}>
                       <Button variant="ghost" size="icon-sm">
                         <ArrowRight className="h-4 w-4" />
                       </Button>

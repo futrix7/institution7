@@ -28,7 +28,7 @@ export default function AdminLoginPage() {
     })
 
     if (error) {
-      toast("Login failed: " + error.message, "error")
+      toast("Login failed: " + error.message, { variant: "destructive" })
       setLoading(false)
       return
     }
@@ -41,12 +41,12 @@ export default function AdminLoginPage() {
 
     if (!admin) {
       await supabase.auth.signOut()
-      toast("Access denied: not an admin account", "error")
+      toast("Access denied: not an admin account", { variant: "destructive" })
       setLoading(false)
       return
     }
 
-    toast("Logged in successfully", "success")
+    toast("Logged in successfully", { variant: "success" })
     router.push("/admin/dashboard")
     setLoading(false)
   }

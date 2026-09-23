@@ -38,8 +38,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts"
-
-const WEEKLY_COLORS = ["#6366f1", "#8b5cf6", "#a78bfa", "#c4b5fd"]
+import { tooltipStyle, axisStyle, gridStyle, CHART_PALETTE } from "@/lib/chart-theme"
 
 type PaymentStatus = "Paid" | "Pending" | "Partial" | "Overdue"
 
@@ -187,13 +186,13 @@ export default function PaymentsPage() {
         <CardContent>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={weeklyData}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="week" tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-              <YAxis tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(v) => `${v / 1000}K`} />
-              <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} formatter={(value) => [`₹${Number(value).toLocaleString("en-IN")}`, "Amount"]} />
+              <CartesianGrid {...gridStyle} vertical={false} />
+              <XAxis dataKey="week" tick={axisStyle} />
+              <YAxis tick={axisStyle} tickFormatter={(v) => `${v / 1000}K`} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(value) => [`₹${Number(value).toLocaleString("en-IN")}`, "Amount"]} />
               <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
                 {weeklyData.map((_, index) => (
-                  <Cell key={`cell-${index}`} fill={WEEKLY_COLORS[index % WEEKLY_COLORS.length]} />
+                  <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
                 ))}
               </Bar>
             </BarChart>

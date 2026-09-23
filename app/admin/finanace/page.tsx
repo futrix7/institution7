@@ -54,9 +54,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-
-const EXPENSE_COLORS = ["#6366f1", "#8b5cf6", "#a78bfa", "#c4b5fd", "#ddd6fe"];
-const BRANCH_COLORS = ["#6366f1", "#8b5cf6", "#a78bfa"];
+import { tooltipStyle, axisStyle, gridStyle, CHART_PALETTE } from "@/lib/chart-theme";
 
 interface SummaryCard {
   title: string;
@@ -439,39 +437,32 @@ export default function AdminFinancePage() {
                     <AreaChart data={monthlyData}>
                       <defs>
                         <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                         </linearGradient>
                         <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
+                          <stop offset="5%" stopColor={CHART_PALETTE[4]} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={CHART_PALETTE[4]} stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <CartesianGrid {...gridStyle} />
                       <XAxis
                         dataKey="month"
-                        className="text-xs"
-                        tick={{ fill: "hsl(var(--muted-foreground))" }}
+                        tick={axisStyle}
                       />
                       <YAxis
-                        className="text-xs"
-                        tick={{ fill: "hsl(var(--muted-foreground))" }}
+                        tick={axisStyle}
                         tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}K`}
                       />
                       <Tooltip
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "8px",
-                          color: "hsl(var(--foreground))",
-                        }}
+                        contentStyle={tooltipStyle}
                         formatter={(value) => [`₹${(Number(value) / 1000).toFixed(0)}K`, ""]}
                       />
                       <Legend />
                       <Area
                         type="monotone"
                         dataKey="revenue"
-                        stroke="#6366f1"
+                        stroke="#10b981"
                         strokeWidth={2}
                         fillOpacity={1}
                         fill="url(#colorRevenue)"
@@ -480,7 +471,7 @@ export default function AdminFinancePage() {
                       <Area
                         type="monotone"
                         dataKey="expenses"
-                        stroke="#f43f5e"
+                        stroke={CHART_PALETTE[4]}
                         strokeWidth={2}
                         fillOpacity={1}
                         fill="url(#colorExpenses)"
@@ -514,17 +505,12 @@ export default function AdminFinancePage() {
                           {expenseBreakdown.map((entry, index) => (
                             <Cell
                               key={`cell-${index}`}
-                              fill={EXPENSE_COLORS[index % EXPENSE_COLORS.length]}
+                              fill={CHART_PALETTE[index % CHART_PALETTE.length]}
                             />
                           ))}
                         </Pie>
                         <Tooltip
-                          contentStyle={{
-                            backgroundColor: "hsl(var(--card))",
-                            border: "1px solid hsl(var(--border))",
-                            borderRadius: "8px",
-                            color: "hsl(var(--foreground))",
-                          }}
+                          contentStyle={tooltipStyle}
                           formatter={(value) => [`₹${(Number(value) / 1000).toFixed(0)}K`, ""]}
                         />
                         <Legend />
@@ -536,7 +522,7 @@ export default function AdminFinancePage() {
                           <div className="flex items-center gap-2">
                             <div
                               className="h-3 w-3 rounded-full"
-                              style={{ backgroundColor: EXPENSE_COLORS[index % EXPENSE_COLORS.length] }}
+                              style={{ backgroundColor: CHART_PALETTE[index % CHART_PALETTE.length] }}
                             />
                             <span>{item.name}</span>
                           </div>
@@ -559,32 +545,25 @@ export default function AdminFinancePage() {
                   <CardContent>
                     <ResponsiveContainer width="100%" height={350}>
                       <BarChart data={branchData} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid {...gridStyle} />
                         <XAxis
                           type="number"
-                          className="text-xs"
-                          tick={{ fill: "hsl(var(--muted-foreground))" }}
+                          tick={axisStyle}
                           tickFormatter={(value) => `₹${(value / 100000).toFixed(1)}L`}
                         />
                         <YAxis
                           type="category"
                           dataKey="branch"
-                          className="text-xs"
-                          tick={{ fill: "hsl(var(--muted-foreground))" }}
+                          tick={axisStyle}
                           width={100}
                         />
                         <Tooltip
-                          contentStyle={{
-                            backgroundColor: "hsl(var(--card))",
-                            border: "1px solid hsl(var(--border))",
-                            borderRadius: "8px",
-                            color: "hsl(var(--foreground))",
-                          }}
+                          contentStyle={tooltipStyle}
                           formatter={(value) => [`₹${(Number(value) / 100000).toFixed(1)}L`, "Revenue"]}
                         />
                         <Bar dataKey="revenue" radius={[0, 8, 8, 0]}>
                           {branchData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={BRANCH_COLORS[index % BRANCH_COLORS.length]} />
+                            <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
                           ))}
                         </Bar>
                       </BarChart>

@@ -40,6 +40,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
+import { tooltipStyle, axisStyle, gridStyle, CHART_PALETTE } from "@/lib/chart-theme";
 import type { Database } from "@/types/database";
 
 type Student = Database["public"]["Tables"]["students"]["Row"];
@@ -50,10 +51,6 @@ type Transaction = Database["public"]["Tables"]["transactions"]["Row"];
 type Branch = Database["public"]["Tables"]["branches"]["Row"];
 
 const TABS = ["This Month", "This Quarter", "This Year"] as const;
-
-const PIE_COLORS = ["#8b5cf6", "#06b6d4", "#f59e0b"];
-const BRANCH_COLORS = ["#3b82f6", "#8b5cf6", "#10b981"];
-const COMPLETION_COLORS = ["#10b981", "#f59e0b", "#ef4444"];
 
 function formatDate(d: Date) {
   return d.toISOString().split("T")[0];
@@ -414,15 +411,15 @@ export default function AnalyticsPage() {
             <AreaChart data={data.enrollments}>
               <defs>
                 <linearGradient id="colorEnroll" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-              <XAxis dataKey="month" className="text-xs" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-              <YAxis className="text-xs" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-              <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} />
-              <Area type="monotone" dataKey="value" stroke="#8b5cf6" strokeWidth={2} fillOpacity={1} fill="url(#colorEnroll)" name="Enrollments" />
+              <CartesianGrid {...gridStyle} />
+              <XAxis dataKey="month" tick={axisStyle} />
+              <YAxis tick={axisStyle} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorEnroll)" name="Enrollments" />
             </AreaChart>
           </ResponsiveContainer>
           <div className="mt-3 flex items-center justify-between border-t pt-3">
@@ -457,10 +454,10 @@ export default function AnalyticsPage() {
                   label={({ name, value }) => `${name}: ${value}%`}
                 >
                   {enrollmentPie.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index]} />
+                    <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} />
+                <Tooltip contentStyle={tooltipStyle} />
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
@@ -479,13 +476,13 @@ export default function AnalyticsPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={branchData}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="name" className="text-xs" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <YAxis className="text-xs" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} />
+                <CartesianGrid {...gridStyle} />
+                <XAxis dataKey="name" tick={axisStyle} />
+                <YAxis tick={axisStyle} />
+                <Tooltip contentStyle={tooltipStyle} />
                 <Bar dataKey="students" name="Students" radius={[4, 4, 0, 0]}>
                   {branchData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={BRANCH_COLORS[index % BRANCH_COLORS.length]} />
+                    <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
                   ))}
                 </Bar>
               </BarChart>
@@ -513,16 +510,16 @@ export default function AnalyticsPage() {
                     <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="colorExp" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                    <stop offset="5%" stopColor={CHART_PALETTE[4]} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={CHART_PALETTE[4]} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} />
+                <CartesianGrid {...gridStyle} />
+                <XAxis dataKey="month" tick={axisStyle} />
+                <YAxis tick={axisStyle} />
+                <Tooltip contentStyle={tooltipStyle} />
                 <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorRev)" name="Revenue (₹L)" />
-                <Area type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorExp)" name="Expenses (₹L)" />
+                <Area type="monotone" dataKey="expenses" stroke={CHART_PALETTE[4]} strokeWidth={2} fillOpacity={1} fill="url(#colorExp)" name="Expenses (₹L)" />
                 <Legend />
               </AreaChart>
             </ResponsiveContainer>
@@ -551,10 +548,10 @@ export default function AnalyticsPage() {
                   label={({ name, value }) => `${value}%`}
                 >
                   {completionData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COMPLETION_COLORS[index]} />
+                    <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} />
+                <Tooltip contentStyle={tooltipStyle} />
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
@@ -575,11 +572,11 @@ export default function AnalyticsPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={weeklyAttendance}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} />
-                <Bar dataKey="rate" name="Attendance %" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                <CartesianGrid {...gridStyle} />
+                <XAxis dataKey="day" tick={axisStyle} />
+                <YAxis domain={[0, 100]} tick={axisStyle} />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Bar dataKey="rate" name="Attendance %" fill="#10b981" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -644,7 +641,7 @@ export default function AnalyticsPage() {
                   <div className="relative h-20">
                     <div className="absolute bottom-0 left-0 right-0 h-full rounded-lg bg-muted/50" />
                     <div
-                      className="absolute bottom-0 left-0 right-0 rounded-lg bg-gradient-to-t from-violet-600 to-violet-400 transition-all duration-500"
+                      className="absolute bottom-0 left-0 right-0 rounded-lg bg-gradient-to-t from-emerald-600 to-emerald-400 transition-all duration-500"
                       style={{ height: `${demo.percentage}%` }}
                     />
                   </div>

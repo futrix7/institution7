@@ -1,9 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
+import { QRCodeSVG } from "qrcode.react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -37,6 +38,10 @@ import {
   Database,
   Cloud,
   Loader2,
+  Shield,
+  CreditCard,
+  CheckCircle2,
+  RefreshCw,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
@@ -125,6 +130,14 @@ const courseCardVariants: Variants = {
   }),
 }
 
+function getTotalFee(courses: string[]): number {
+  return courses.reduce((sum, c) => {
+    const info = courseInfo[c]
+    if (!info) return sum
+    return sum + parseInt(info.fee.replace(/[₹,]/g, ""))
+  }, 0)
+}
+
 export default function UserRegisterPage() {
   const router = useRouter()
   const { toast } = useToast()
@@ -146,10 +159,62 @@ export default function UserRegisterPage() {
   const [agreeTerms, setAgreeTerms] = useState(false)
   const [signature, setSignature] = useState("")
 
+  const [otpSent, setOtpSent] = useState(false)
+  const [otpCode, setOtpCode] = useState(["", "", "", "", "", ""])
+  const [otpVerifying, setOtpVerifying] = useState(false)
+  const [otpVerified, setOtpVerified] = useState(false)
+  const [otpError, setOtpError] = useState("")
+  const [sendingOtp, setSendingOtp] = useState(false)
+  const otpRefs = useRef<(HTMLInputElement | null)[]>([])
+  const prevEmailRef = useRef(email)
+
+  useEffect(() => {
+    if (prevEmailRef.current !== email && step >= 2) {
+      if (otpVerified || otpSent) {
+        setOtpVerified(false)
+        setOtpSent(false)
+        setOtpCode(["", "", "", "", "", ""])
+        setOtpError("")
+        toast("Email changed — please verify the new email", {
+          variant: "info",
+          action: {
+            label: "Send OTP",
+            onClick: () => {
+              setSendingOtp(true)
+              fetch("/api/send-otp", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email }),
+              }).then((res) => {
+                if (res.ok) {
+                  setOtpSent(true)
+                  toast("OTP sent to your email", { variant: "success" })
+                  setTimeout(() => otpRefs.current[0]?.focus(), 100)
+                } else {
+                  setOtpError("Failed to send OTP")
+                }
+              }).catch(() => {
+                setOtpError("Failed to send OTP")
+              }).finally(() => {
+                setSendingOtp(false)
+              })
+            },
+          },
+        })
+      }
+    }
+    prevEmailRef.current = email
+  }, [email, step, otpVerified, otpSent, toast])
+
+  const [paymentDone, setPaymentDone] = useState(false)
+  const [confirmingPayment, setConfirmingPayment] = useState(false)
+
   const steps = [
     { id: 1, title: "Personal Info",     icon: User,      description: "Tell us about yourself" },
-    { id: 2, title: "Choose Course",      icon: BookOpen,  description: "Select branch & course" },
-    { id: 3, title: "Final Details",      icon: FileText,  description: "Review & submit" },
+    { id: 2, title: "Verify Email",       icon: Shield,    description: "OTP verification" },
+    { id: 3, title: "Choose Course",      icon: BookOpen,  description: "Select branch & course" },
+    { id: 4, title: "Payment",            icon: CreditCard, description: "UPI payment" },
+    { id: 5, title: "Final Details",      icon: FileText,  description: "Review & submit" },
   ]
 
   const totalSteps = steps.length
@@ -159,7 +224,9 @@ export default function UserRegisterPage() {
   function goNext() {
     if (step >= totalSteps) return
     if (step === 1 && (!fullName || !fatherName || !email || !phone)) return
-    if (step === 2 && (!branch || selectedCourses.length === 0)) return
+    if (step === 2 && !otpVerified) return
+    if (step === 3 && (!branch || selectedCourses.length === 0)) return
+    if (step === 4 && !paymentDone) return
     setDirection(1)
     setStep((s) => s + 1)
   }
@@ -179,16 +246,131 @@ export default function UserRegisterPage() {
     )
   }
 
+  async function handleSendOtp() {
+    setSendingOtp(true)
+    setOtpError("")
+    try {
+      const res = await fetch("/api/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      })
+      if (res.ok) {
+        setOtpSent(true)
+        toast("OTP sent to your email", { variant: "success" })
+        setTimeout(() => otpRefs.current[0]?.focus(), 100)
+      } else {
+        const data = await res.json()
+        setOtpError(data.error || "Failed to send OTP")
+      }
+    } catch {
+      setOtpError("Failed to send OTP. Please try again.")
+    } finally {
+      setSendingOtp(false)
+    }
+  }
+
+  const handleOtpChange = useCallback((index: number, value: string) => {
+    if (!/^\d*$/.test(value)) return
+    const newOtp = [...otpCode]
+    newOtp[index] = value.slice(-1)
+    setOtpCode(newOtp)
+    setOtpError("")
+
+    if (value && index < 5) {
+      otpRefs.current[index + 1]?.focus()
+    }
+
+    if (newOtp.every((d) => d.length === 1)) {
+      verifyOtpCode(newOtp.join(""))
+    }
+  }, [otpCode])
+
+  function handleOtpKeyDown(index: number, e: React.KeyboardEvent) {
+    if (e.key === "Backspace" && !otpCode[index] && index > 0) {
+      otpRefs.current[index - 1]?.focus()
+    }
+  }
+
+  function handleOtpPaste(e: React.ClipboardEvent) {
+    e.preventDefault()
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6)
+    if (pasted.length === 6) {
+      const newOtp = pasted.split("")
+      setOtpCode(newOtp)
+      otpRefs.current[5]?.focus()
+      verifyOtpCode(pasted)
+    }
+  }
+
+  async function verifyOtpCode(code: string) {
+    setOtpVerifying(true)
+    setOtpError("")
+    try {
+      const res = await fetch("/api/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code }),
+      })
+      if (res.ok) {
+        setOtpVerified(true)
+        toast("Email verified successfully!", { variant: "success" })
+      } else {
+        const data = await res.json()
+        setOtpError(data.error || "Invalid OTP")
+        setOtpCode(["", "", "", "", "", ""])
+        otpRefs.current[0]?.focus()
+      }
+    } catch {
+      setOtpError("Verification failed. Please try again.")
+    } finally {
+      setOtpVerifying(false)
+    }
+  }
+
+  async function handlePaymentConfirm() {
+    setConfirmingPayment(true)
+    const totalFee = getTotalFee(selectedCourses)
+
+    const { count } = await supabase
+      .from("students")
+      .select("id", { count: "exact", head: true })
+
+    const paymentId = `PAY-${new Date().getFullYear()}-${String((count ?? 0) + 1).padStart(4, "0")}`
+
+    await supabase.from("payments").insert({
+      id: paymentId,
+      email: email,
+      amount: totalFee,
+      status: "pending",
+      method: "upi",
+    })
+
+    setPaymentDone(true)
+    setConfirmingPayment(false)
+    toast("Payment confirmed! Completing registration...", { variant: "success" })
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
     if (password !== confirmPassword) {
-      toast("Passwords do not match", "error")
+      toast("Passwords do not match", { variant: "destructive" })
       return
     }
 
     if (!agreeTerms) {
-      toast("Please agree to the terms", "error")
+      toast("Please agree to the terms", { variant: "destructive" })
+      return
+    }
+
+    if (!otpVerified) {
+      toast("Please verify your email first", { variant: "destructive" })
+      return
+    }
+
+    if (!paymentDone) {
+      toast("Please complete the payment", { variant: "destructive" })
       return
     }
 
@@ -203,14 +385,14 @@ export default function UserRegisterPage() {
     })
 
     if (authError) {
-      toast("Registration failed: " + authError.message, "error")
+      toast("Registration failed: " + authError.message, { variant: "destructive" })
       setSubmitting(false)
       return
     }
 
     const userId = authData.user?.id
     if (!userId) {
-      toast("Registration failed: no user ID", "error")
+      toast("Registration failed: no user ID", { variant: "destructive" })
       setSubmitting(false)
       return
     }
@@ -237,21 +419,19 @@ export default function UserRegisterPage() {
     })
 
     if (studentError) {
-      toast("Failed to create student record: " + studentError.message, "error")
+      toast("Failed to create student record: " + studentError.message, { variant: "destructive" })
       setSubmitting(false)
       return
     }
 
-    const feeNumeric = courseInfo[primaryCourse]
-      ? parseInt(courseInfo[primaryCourse].fee.replace(/[₹,]/g, ""))
-      : 0
+    const feeNumeric = getTotalFee(selectedCourses)
 
     await supabase.from("fees").insert({
       student_id: studentId,
       course_slug: courseSlug,
       total_fee: feeNumeric,
-      paid_amount: 0,
-      pending_amount: feeNumeric,
+      paid_amount: feeNumeric,
+      pending_amount: 0,
     })
 
     if (feeNumeric > 0) {
@@ -262,24 +442,30 @@ export default function UserRegisterPage() {
         .single()
 
       if (feeRow) {
-        const months = 3
-        const perMonth = Math.ceil(feeNumeric / months)
         const now = new Date()
-        const installments = Array.from({ length: months }, (_, i) => ({
+        await supabase.from("fee_installments").insert({
           fee_id: feeRow.id,
-          label: `Installment ${i + 1} of ${months}`,
-          amount: perMonth,
-          due_date: new Date(now.getFullYear(), now.getMonth() + i + 1, 1).toISOString().split("T")[0],
-          status: "Pending" as const,
-        }))
-        await supabase.from("fee_installments").insert(installments)
+          label: "Full Payment",
+          amount: feeNumeric,
+          due_date: now.toISOString().split("T")[0],
+          status: "Paid",
+        })
       }
     }
 
-    toast("Account created successfully! Please sign in.", "success")
+    await supabase
+      .from("payments")
+      .update({ status: "completed", student_id: studentId })
+      .eq("email", email)
+      .eq("status", "pending")
+
+    toast("Account created successfully! Please sign in.", { variant: "success" })
     router.push("/auth/user/login")
     setSubmitting(false)
   }
+
+  const totalFee = getTotalFee(selectedCourses)
+  const upiUri = `upi://pay?pa=${process.env.NEXT_PUBLIC_UPI_ID || "tngc@upi"}&pn=${encodeURIComponent(process.env.NEXT_PUBLIC_UPI_NAME || "TNGC Computers")}&am=${totalFee}&cu=INR`
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/30 px-4 py-8">
@@ -427,6 +613,105 @@ export default function UserRegisterPage() {
                         {step === 2 && (
                           <>
                             <div className="mb-4">
+                              <h2 className="text-lg font-bold text-foreground">Verify Your Email</h2>
+                              <p className="text-sm text-muted-foreground">We&apos;ll send a 6-digit code to <span className="font-semibold text-foreground">{email}</span></p>
+                            </div>
+
+                            {otpVerified ? (
+                              <div className="flex flex-col items-center py-8">
+                                <div className="flex size-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950/40">
+                                  <CheckCircle2 className="size-8 text-emerald-600 dark:text-emerald-400" />
+                                </div>
+                                <p className="mt-4 text-lg font-bold text-foreground">Email Verified!</p>
+                                <p className="mt-1 text-sm text-muted-foreground">Your email has been successfully verified.</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-4">
+                                {!otpSent ? (
+                                  <div className="flex flex-col items-center py-6">
+                                    <div className="flex size-16 items-center justify-center rounded-full bg-primary/10">
+                                      <Shield className="size-8 text-primary" />
+                                    </div>
+                                    <p className="mt-4 text-sm text-muted-foreground text-center">
+                                      Click the button below to send a verification code to your email address.
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      onClick={handleSendOtp}
+                                      className="mt-4 gap-2"
+                                      disabled={sendingOtp}
+                                    >
+                                      {sendingOtp ? (
+                                        <Loader2 className="size-4 animate-spin" />
+                                      ) : (
+                                        <Mail className="size-4" />
+                                      )}
+                                      {sendingOtp ? "Sending OTP..." : "Send Verification Code"}
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-4">
+                                    <p className="text-center text-sm text-muted-foreground">
+                                      Enter the 6-digit code sent to <span className="font-semibold text-foreground">{email}</span>
+                                    </p>
+
+                                    <div className="flex justify-center gap-2">
+                                      {otpCode.map((digit, i) => (
+                                        <input
+                                          key={i}
+                                          ref={(el) => { otpRefs.current[i] = el }}
+                                          type="text"
+                                          inputMode="numeric"
+                                          maxLength={1}
+                                          value={digit}
+                                          onChange={(e) => handleOtpChange(i, e.target.value)}
+                                          onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                                          onPaste={handleOtpPaste}
+                                          className={cn(
+                                            "size-12 text-center text-lg font-bold rounded-xl border-2 transition-all",
+                                            "bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30",
+                                            digit ? "border-primary" : "border-border",
+                                            otpError && "border-red-500"
+                                          )}
+                                          disabled={otpVerifying}
+                                        />
+                                      ))}
+                                    </div>
+
+                                    {otpVerifying && (
+                                      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                                        <Loader2 className="size-4 animate-spin" />
+                                        Verifying...
+                                      </div>
+                                    )}
+
+                                    {otpError && (
+                                      <p className="text-center text-sm text-red-500">{otpError}</p>
+                                    )}
+
+                                    <div className="flex justify-center">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={handleSendOtp}
+                                        disabled={sendingOtp}
+                                        className="gap-1.5 text-xs"
+                                      >
+                                        <RefreshCw className="size-3" />
+                                        Resend OTP
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {step === 3 && (
+                          <>
+                            <div className="mb-4">
                               <h2 className="text-lg font-bold text-foreground">Choose Your Course</h2>
                               <p className="text-sm text-muted-foreground">Select your branch and courses</p>
                             </div>
@@ -523,6 +808,9 @@ export default function UserRegisterPage() {
                                 <p className="text-xs text-muted-foreground">
                                   Selected: <span className="font-semibold text-primary">{selectedCourses.join(", ")}</span>
                                 </p>
+                                <p className="mt-1 text-sm font-bold text-foreground">
+                                  Total Fee: ₹{totalFee.toLocaleString("en-IN")}
+                                </p>
                               </div>
                             )}
                           </>
@@ -531,8 +819,192 @@ export default function UserRegisterPage() {
                         {step === 3 && (
                           <>
                             <div className="mb-4">
+                              <h2 className="text-lg font-bold text-foreground">Verify Your Email</h2>
+                              <p className="text-sm text-muted-foreground">We&apos;ll send a 6-digit code to <span className="font-semibold text-foreground">{email}</span></p>
+                            </div>
+
+                            {otpVerified ? (
+                              <div className="flex flex-col items-center py-8">
+                                <div className="flex size-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950/40">
+                                  <CheckCircle2 className="size-8 text-emerald-600 dark:text-emerald-400" />
+                                </div>
+                                <p className="mt-4 text-lg font-bold text-foreground">Email Verified!</p>
+                                <p className="mt-1 text-sm text-muted-foreground">Your email has been successfully verified.</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-4">
+                                {!otpSent ? (
+                                  <div className="flex flex-col items-center py-6">
+                                    <div className="flex size-16 items-center justify-center rounded-full bg-primary/10">
+                                      <Shield className="size-8 text-primary" />
+                                    </div>
+                                    <p className="mt-4 text-sm text-muted-foreground text-center">
+                                      Click the button below to send a verification code to your email address.
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      onClick={handleSendOtp}
+                                      className="mt-4 gap-2"
+                                      disabled={sendingOtp}
+                                    >
+                                      {sendingOtp ? (
+                                        <Loader2 className="size-4 animate-spin" />
+                                      ) : (
+                                        <Mail className="size-4" />
+                                      )}
+                                      {sendingOtp ? "Sending OTP..." : "Send Verification Code"}
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-4">
+                                    <p className="text-center text-sm text-muted-foreground">
+                                      Enter the 6-digit code sent to <span className="font-semibold text-foreground">{email}</span>
+                                    </p>
+
+                                    <div className="flex justify-center gap-2">
+                                      {otpCode.map((digit, i) => (
+                                        <input
+                                          key={i}
+                                          ref={(el) => { otpRefs.current[i] = el }}
+                                          type="text"
+                                          inputMode="numeric"
+                                          maxLength={1}
+                                          value={digit}
+                                          onChange={(e) => handleOtpChange(i, e.target.value)}
+                                          onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                                          onPaste={handleOtpPaste}
+                                          className={cn(
+                                            "size-12 text-center text-lg font-bold rounded-xl border-2 transition-all",
+                                            "bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30",
+                                            digit ? "border-primary" : "border-border",
+                                            otpError && "border-red-500"
+                                          )}
+                                          disabled={otpVerifying}
+                                        />
+                                      ))}
+                                    </div>
+
+                                    {otpVerifying && (
+                                      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                                        <Loader2 className="size-4 animate-spin" />
+                                        Verifying...
+                                      </div>
+                                    )}
+
+                                    {otpError && (
+                                      <p className="text-center text-sm text-red-500">{otpError}</p>
+                                    )}
+
+                                    <div className="flex justify-center">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={handleSendOtp}
+                                        disabled={sendingOtp}
+                                        className="gap-1.5 text-xs"
+                                      >
+                                        <RefreshCw className="size-3" />
+                                        Resend OTP
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {step === 4 && (
+                          <>
+                            <div className="mb-4">
+                              <h2 className="text-lg font-bold text-foreground">Complete Payment</h2>
+                              <p className="text-sm text-muted-foreground">Scan the QR code below to pay via UPI</p>
+                            </div>
+
+                            <div className="space-y-4">
+                              <div className="rounded-xl border border-border bg-muted/30 p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <span className="text-sm font-medium text-muted-foreground">Course(s)</span>
+                                  <span className="text-sm font-semibold text-foreground">{selectedCourses.join(", ")}</span>
+                                </div>
+                                <div className="flex items-center justify-between border-t border-border pt-3">
+                                  <span className="text-sm font-medium text-muted-foreground">Total Fee</span>
+                                  <span className="text-xl font-extrabold text-foreground">₹{totalFee.toLocaleString("en-IN")}</span>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col items-center rounded-xl border border-border bg-background p-6">
+                                <QRCodeSVG
+                                  value={upiUri}
+                                  size={200}
+                                  bgColor="transparent"
+                                  fgColor="currentColor"
+                                  level="M"
+                                  includeMargin
+                                  className="text-foreground"
+                                />
+                                <p className="mt-3 text-xs text-muted-foreground">Scan with any UPI app</p>
+                                <p className="mt-1 text-sm font-bold text-foreground">{process.env.NEXT_PUBLIC_UPI_ID || "tngc@upi"}</p>
+                              </div>
+
+                              <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground text-center space-y-1">
+                                <p>Pay <span className="font-bold text-foreground">₹{totalFee.toLocaleString("en-IN")}</span> to the UPI ID above</p>
+                                <p>After payment, click the button below to confirm</p>
+                              </div>
+
+                              <div className="flex justify-center">
+                                {paymentDone ? (
+                                  <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                                    <CheckCircle2 className="size-5" />
+                                    <span className="font-semibold">Payment Confirmed</span>
+                                  </div>
+                                ) : (
+                                  <Button
+                                    type="button"
+                                    onClick={handlePaymentConfirm}
+                                    disabled={confirmingPayment}
+                                    className="gap-2"
+                                  >
+                                    {confirmingPayment ? (
+                                      <Loader2 className="size-4 animate-spin" />
+                                    ) : (
+                                      <CheckCircle2 className="size-4" />
+                                    )}
+                                    {confirmingPayment ? "Confirming..." : "I have paid"}
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        {step === 5 && (
+                          <>
+                            <div className="mb-4">
                               <h2 className="text-lg font-bold text-foreground">Final Details</h2>
                               <p className="text-sm text-muted-foreground">Complete your registration</p>
+                            </div>
+
+                            <div className="rounded-xl border border-border bg-muted/30 p-4 mb-4">
+                              <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div>
+                                  <span className="text-muted-foreground">Name:</span>
+                                  <p className="font-semibold text-foreground">{fullName}</p>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Email:</span>
+                                  <p className="font-semibold text-foreground">{email}</p>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Course:</span>
+                                  <p className="font-semibold text-foreground">{selectedCourses.join(", ")}</p>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Fee Paid:</span>
+                                  <p className="font-semibold text-emerald-600 dark:text-emerald-400">₹{totalFee.toLocaleString("en-IN")}</p>
+                                </div>
+                              </div>
                             </div>
 
                             <div className="space-y-2">
@@ -634,7 +1106,7 @@ export default function UserRegisterPage() {
                   </div>
 
                   <div className="mt-6 flex items-center gap-3 border-t border-border pt-4">
-                    <Button type="button" variant="outline" onClick={goPrev} className="gap-1.5" disabled={submitting}>
+                    <Button type="button" variant="outline" onClick={goPrev} className="gap-1.5" disabled={submitting || step === 1}>
                       <ArrowLeft className="size-4" />
                       Back
                     </Button>
@@ -648,7 +1120,9 @@ export default function UserRegisterPage() {
                         className="gap-1.5 px-6"
                         disabled={
                           (step === 1 && (!fullName || !fatherName || !email || !phone)) ||
-                          (step === 2 && (!branch || selectedCourses.length === 0))
+                          (step === 2 && (!branch || selectedCourses.length === 0)) ||
+                          (step === 3 && !otpVerified) ||
+                          (step === 4 && !paymentDone)
                         }
                       >
                         Continue <ArrowRight className="size-4" />

@@ -34,7 +34,7 @@ export function AddStudentSheet({ open, onOpenChange, onSuccess }: AddStudentShe
 
   async function handleSubmit() {
     if (!fullName.trim() || !email.trim() || !phone.trim()) {
-      toast("Please fill in all required fields", "error")
+      toast("Please fill in all required fields", { variant: "destructive" })
       return
     }
 
@@ -62,11 +62,11 @@ export function AddStudentSheet({ open, onOpenChange, onSuccess }: AddStudentShe
     setSaving(false)
 
     if (error) {
-      toast("Failed to add student: " + error.message, "error")
+      toast("Failed to add student: " + error.message, { variant: "destructive" })
       return
     }
 
-    toast("Student added successfully", "success")
+    toast("Student added successfully", { variant: "success" })
     setFullName("")
     setEmail("")
     setPhone("")

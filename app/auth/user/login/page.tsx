@@ -28,12 +28,12 @@ export default function UserLoginPage() {
     })
 
     if (error) {
-      toast("Login failed: " + error.message, "error")
+      toast("Login failed: " + error.message, { variant: "destructive" })
       setLoading(false)
       return
     }
 
-    toast("Logged in successfully", "success")
+    toast("Logged in successfully", { variant: "success" })
     router.push("/student/dashboard")
     setLoading(false)
   }

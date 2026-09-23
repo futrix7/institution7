@@ -256,7 +256,7 @@ export default function InstallmentsPage() {
 
   async function handleCreateInstallments() {
     if (!selectedStudent) {
-      toast("Please select a student", "error")
+      toast("Please select a student", { variant: "destructive" })
       return
     }
 
@@ -264,7 +264,7 @@ export default function InstallmentsPage() {
     const student = students.find((s) => s.id === selectedStudent && s.feeId === selectedStudent)
       || students.find((s) => s.id === selectedStudent)
     if (!student) {
-      toast("Student not found", "error")
+      toast("Student not found", { variant: "destructive" })
       setCreating(false)
       return
     }
@@ -276,7 +276,7 @@ export default function InstallmentsPage() {
       .limit(1)
 
     if (existing && existing.length > 0) {
-      toast("Installment plan already exists for this student", "error")
+      toast("Installment plan already exists for this student", { variant: "destructive" })
       setCreating(false)
       return
     }
@@ -299,11 +299,11 @@ export default function InstallmentsPage() {
     setCreating(false)
 
     if (error) {
-      toast("Failed to create installments: " + error.message, "error")
+      toast("Failed to create installments: " + error.message, { variant: "destructive" })
       return
     }
 
-    toast(`${count}-month installment plan created`, "success")
+    toast(`${count}-month installment plan created`, { variant: "success" })
     setSelectedStudent("")
     setInstallmentCount("3")
     setAddOpen(false)
@@ -325,11 +325,11 @@ export default function InstallmentsPage() {
     setPaying(false)
 
     if (error) {
-      toast("Failed to mark as paid: " + error.message, "error")
+      toast("Failed to mark as paid: " + error.message, { variant: "destructive" })
       return
     }
 
-    toast("Installment marked as paid", "success")
+    toast("Installment marked as paid", { variant: "success" })
     setPayOpen(false)
     setPayingId(null)
     fetchInstallments()

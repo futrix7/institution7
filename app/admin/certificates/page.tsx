@@ -150,7 +150,7 @@ export default function AdminCertificatesPage() {
 
   async function handleIssueCertificate() {
     if (!selectedStudent) {
-      toast("Please select a student", "error")
+      toast("Please select a student", { variant: "destructive" })
       return
     }
 
@@ -158,7 +158,7 @@ export default function AdminCertificatesPage() {
 
     const student = students.find((s) => s.id === selectedStudent)
     if (!student) {
-      toast("Student not found", "error")
+      toast("Student not found", { variant: "destructive" })
       setIssuing(false)
       return
     }
@@ -181,11 +181,11 @@ export default function AdminCertificatesPage() {
     setIssuing(false)
 
     if (error) {
-      toast("Failed to issue certificate: " + error.message, "error")
+      toast("Failed to issue certificate: " + error.message, { variant: "destructive" })
       return
     }
 
-    toast("Certificate issued successfully", "success")
+    toast("Certificate issued successfully", { variant: "success" })
     setSelectedStudent("")
     setCertType("Completion")
     setIssueOpen(false)

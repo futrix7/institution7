@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { BookOpen } from "lucide-react"
 import { FormSheet, FormField } from "@/components/admin/form-sheet"
 import { Input } from "@/components/ui/input"
@@ -14,13 +14,27 @@ import {
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/components/ui/sonner"
 
-interface AddCourseSheetProps {
+interface CourseData {
+  id: string
+  name: string
+  short_name: string
+  duration: string
+  category: string
+  fee: number
+  eligibility: string
+  description: string
+  topics: string[]
+  status?: string
+}
+
+interface EditCourseSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  course: CourseData | null
   onSuccess: () => void
 }
 
-export function AddCourseSheet({ open, onOpenChange, onSuccess }: AddCourseSheetProps) {
+export function EditCourseSheet({ open, onOpenChange, course, onSuccess }: EditCourseSheetProps) {
   const { toast } = useToast()
   const [courseName, setCourseName] = useState("")
   const [shortName, setShortName] = useState("")
@@ -32,12 +46,26 @@ export function AddCourseSheet({ open, onOpenChange, onSuccess }: AddCourseSheet
   const [topics, setTopics] = useState("")
   const [saving, setSaving] = useState(false)
 
+  useEffect(() => {
+    if (course) {
+      setCourseName(course.name)
+      setShortName(course.short_name)
+      setDuration(course.duration)
+      setCourseType(course.category)
+      setFee(String(course.fee))
+      setEligibility(course.eligibility)
+      setDescription(course.description)
+      setTopics(course.topics.join(", "))
+    }
+  }, [course])
+
   async function handleSubmit() {
     if (!courseName.trim() || !shortName.trim() || !duration.trim()) {
       toast("Please fill in all required fields", { variant: "destructive" })
       return
     }
 
+    if (!course) return
     setSaving(true)
 
     const slug = courseName
@@ -45,41 +73,31 @@ export function AddCourseSheet({ open, onOpenChange, onSuccess }: AddCourseSheet
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)/g, "")
 
-    const { error } = await supabase.from("courses").insert({
-      slug,
-      name: courseName.trim(),
-      short_name: shortName.trim(),
-      duration: duration.trim(),
-      type: (courseType as "long-term" | "short-term") || "long-term",
-      description: description.trim() || courseName.trim(),
-      full_description: description.trim() || courseName.trim(),
-      topics: topics ? topics.split(",").map((t) => t.trim()).filter(Boolean) : [],
-      fees: fee ? `₹${Number(fee).toLocaleString("en-IN")}` : "₹0",
-      fee_numeric: fee ? parseInt(fee) : 0,
-      eligibility: eligibility || "Any",
-      certification: "Course Completion Certificate",
-      certification_body: "TNGC Institute",
-      schedule: "Weekdays: 9 AM - 11 AM",
-      batch_size: "10-15 students",
-      status: "active",
-    })
+    const { error } = await supabase
+      .from("courses")
+      .update({
+        slug,
+        name: courseName.trim(),
+        short_name: shortName.trim(),
+        duration: duration.trim(),
+        type: courseType || "long-term",
+        description: description.trim() || courseName.trim(),
+        full_description: description.trim() || courseName.trim(),
+        topics: topics ? topics.split(",").map((t) => t.trim()).filter(Boolean) : [],
+        fees: fee ? `₹${Number(fee).toLocaleString("en-IN")}` : "₹0",
+        fee_numeric: fee ? parseInt(fee) : 0,
+        eligibility: eligibility || "Any",
+      })
+      .eq("id", course.id)
 
     setSaving(false)
 
     if (error) {
-      toast("Failed to add course: " + error.message, { variant: "destructive" })
+      toast("Failed to update course: " + error.message, { variant: "destructive" })
       return
     }
 
-    toast("Course added successfully", { variant: "success" })
-    setCourseName("")
-    setShortName("")
-    setDuration("")
-    setCourseType("")
-    setFee("")
-    setEligibility("")
-    setDescription("")
-    setTopics("")
+    toast("Course updated successfully", { variant: "success" })
     onOpenChange(false)
     onSuccess()
   }
@@ -88,9 +106,9 @@ export function AddCourseSheet({ open, onOpenChange, onSuccess }: AddCourseSheet
     <FormSheet
       open={open}
       onOpenChange={onOpenChange}
-      title="Add New Course"
+      title="Edit Course"
       icon={BookOpen}
-      submitLabel={saving ? "Adding..." : "Add Course"}
+      submitLabel={saving ? "Saving..." : "Save Changes"}
       onSubmit={handleSubmit}
     >
       <div className="grid grid-cols-2 gap-3">

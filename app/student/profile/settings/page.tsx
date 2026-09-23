@@ -86,14 +86,14 @@ export default function StudentSettings() {
 
   const handlePasswordChange = () => {
     if (newPassword.length < 6) {
-      toast("Password must be at least 6 characters", "error")
+      toast("Password must be at least 6 characters", { variant: "destructive" })
       return
     }
     if (newPassword !== confirmPassword) {
-      toast("Passwords do not match", "error")
+      toast("Passwords do not match", { variant: "destructive" })
       return
     }
-    toast("Password updated successfully", "success")
+    toast("Password updated successfully", { variant: "success" })
     setPasswordDialogOpen(false)
     setCurrentPassword("")
     setNewPassword("")

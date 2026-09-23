@@ -155,7 +155,7 @@ export default function StudentFee() {
     })
 
     if (paymentErr) {
-      toast("Payment failed: " + paymentErr.message, "error")
+      toast("Payment failed: " + paymentErr.message, { variant: "destructive" })
       setPaying(false)
       return
     }
@@ -169,7 +169,7 @@ export default function StudentFee() {
       .eq("id", feeId)
 
     if (feeErr) {
-      toast("Payment recorded but fee update failed: " + feeErr.message, "error")
+      toast("Payment recorded but fee update failed: " + feeErr.message, { variant: "destructive" })
     }
 
     setPaid(true)

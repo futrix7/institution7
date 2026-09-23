@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
+import { tooltipStyle, axisStyle, gridStyle, CHART_PALETTE } from "@/lib/chart-theme";
 
 const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   confirmed: "default",
@@ -56,8 +57,6 @@ const priorityBadge: Record<string, "destructive" | "secondary" | "outline"> = {
   medium: "secondary",
   low: "outline",
 };
-
-const BRANCH_COLORS = ["#3b82f6", "#8b5cf6", "#10b981"];
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -351,10 +350,10 @@ export default function AdminDashboardPage() {
                     <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="month" className="text-xs" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <YAxis className="text-xs" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} />
+                <CartesianGrid {...gridStyle} />
+                <XAxis dataKey="month" tick={axisStyle} />
+                <YAxis tick={axisStyle} />
+                <Tooltip contentStyle={tooltipStyle} />
                 <Area type="monotone" dataKey="students" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorStudents)" />
               </AreaChart>
             </ResponsiveContainer>
@@ -372,11 +371,11 @@ export default function AdminDashboardPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={courseEnrollment}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="course" className="text-xs" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <YAxis className="text-xs" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} />
-                <Bar dataKey="enrollments" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                <CartesianGrid {...gridStyle} />
+                <XAxis dataKey="course" tick={axisStyle} />
+                <YAxis tick={axisStyle} />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Bar dataKey="enrollments" fill="#10b981" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -408,10 +407,10 @@ export default function AdminDashboardPage() {
                   label={({ name, value }) => `${name}: ₹${value}L`}
                 >
                   {branchRevenue.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={BRANCH_COLORS[index]} />
+                    <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} />
+                <Tooltip contentStyle={tooltipStyle} />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
@@ -429,11 +428,11 @@ export default function AdminDashboardPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={weeklyAttendance}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", color: "hsl(var(--foreground))" }} />
-                <Bar dataKey="rate" name="Attendance %" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                <CartesianGrid {...gridStyle} />
+                <XAxis dataKey="day" tick={axisStyle} />
+                <YAxis domain={[0, 100]} tick={axisStyle} />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Bar dataKey="rate" name="Attendance %" fill="#10b981" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

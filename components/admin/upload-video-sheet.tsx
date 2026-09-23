@@ -30,7 +30,7 @@ export function UploadVideoSheet({ open, onOpenChange, onSuccess }: UploadVideoS
 
   async function handleSubmit() {
     if (!title.trim()) {
-      toast("Please enter a video title", "error")
+      toast("Please enter a video title", { variant: "destructive" })
       return
     }
 
@@ -51,11 +51,11 @@ export function UploadVideoSheet({ open, onOpenChange, onSuccess }: UploadVideoS
     setSaving(false)
 
     if (error) {
-      toast("Failed to upload video: " + error.message, "error")
+      toast("Failed to upload video: " + error.message, { variant: "destructive" })
       return
     }
 
-    toast("Video uploaded successfully", "success")
+    toast("Video uploaded successfully", { variant: "success" })
     setTitle("")
     setUrl("")
     setCourse("")

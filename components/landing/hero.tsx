@@ -16,12 +16,12 @@ const BADGES = [
 
 export function Hero() {
   return (
-    <section className="relative flex min-h-dvh w-full items-center justify-center overflow-hidden bg-black py-2 sm:py-3">
+    <section className="relative flex min-h-dvh w-full items-center justify-center overflow-hidden bg-background py-2 sm:py-3">
       <motion.div
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.7, ease: "easeOut" }}
-        className="relative h-[98dvh] w-[98%] max-w-[1600px] overflow-hidden rounded-2xl shadow-2xl sm:rounded-3xl"
+        className="relative h-[98dvh] w-[98%] max-w-[1600px] overflow-hidden rounded-2xl sm:rounded-3xl"
       >
         {/* Background image */}
         <Image
