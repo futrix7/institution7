@@ -31,6 +31,7 @@ import {
   Mail,
   Eye,
   EyeOff,
+  Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
@@ -77,6 +78,7 @@ export default function StudentSettings() {
   const [showCurrent, setShowCurrent] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  const [passwordLoading, setPasswordLoading] = useState(false)
 
   const updateNotification = (key: keyof NotificationSettings, value: boolean) => {
     const updated = { ...notifications, [key]: value }
@@ -84,7 +86,7 @@ export default function StudentSettings() {
     localStorage.setItem("tngc_student_notifications", JSON.stringify(updated))
   }
 
-  const handlePasswordChange = () => {
+  const handlePasswordChange = async () => {
     if (newPassword.length < 6) {
       toast("Password must be at least 6 characters", { variant: "destructive" })
       return
@@ -93,11 +95,39 @@ export default function StudentSettings() {
       toast("Passwords do not match", { variant: "destructive" })
       return
     }
+    if (!currentPassword) {
+      toast("Please enter your current password", { variant: "destructive" })
+      return
+    }
+    setPasswordLoading(true)
+
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: user?.email ?? "",
+      password: currentPassword,
+    })
+
+    if (verifyError) {
+      toast("Current password is incorrect", { variant: "destructive" })
+      setPasswordLoading(false)
+      return
+    }
+
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+
+    if (error) {
+      toast("Failed to update password: " + error.message, { variant: "destructive" })
+      setPasswordLoading(false)
+      return
+    }
+
     toast("Password updated successfully", { variant: "success" })
     setPasswordDialogOpen(false)
     setCurrentPassword("")
     setNewPassword("")
     setConfirmPassword("")
+    setPasswordLoading(false)
   }
 
   const handleSignOut = async () => {
@@ -322,8 +352,17 @@ export default function StudentSettings() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPasswordDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handlePasswordChange}>Update Password</Button>
+            <Button variant="outline" onClick={() => setPasswordDialogOpen(false)} disabled={passwordLoading}>Cancel</Button>
+            <Button onClick={handlePasswordChange} disabled={passwordLoading}>
+              {passwordLoading ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                "Update Password"
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

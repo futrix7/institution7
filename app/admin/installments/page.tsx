@@ -79,6 +79,11 @@ interface StudentOption {
   branch_name: string
 }
 
+interface StudentMapEntry {
+  full_name: string | null
+  branch_id: string | null
+}
+
 const statusConfig: Record<string, { className: string; icon: React.ElementType }> = {
   Paid: { className: "bg-emerald-500/15 text-emerald-600", icon: CheckCircle2 },
   Pending: { className: "bg-amber-500/15 text-amber-600", icon: Clock },
@@ -130,36 +135,35 @@ export default function InstallmentsPage() {
       return
     }
 
-    const studentIds = [...new Set(rows.map((r: any) => r.fees?.student_id).filter(Boolean))] as string[]
-    const courseSlugs = [...new Set(rows.map((r: any) => r.fees?.course_slug).filter(Boolean))] as string[]
-    const feeIds = [...new Set(rows.map((r: any) => r.fee_id).filter(Boolean))] as string[]
+    const studentIds = [...new Set(rows.map((r) => r?.fees?.student_id).filter(Boolean))] as string[]
+    const courseSlugs = [...new Set(rows.map((r) => r?.fees?.course_slug).filter(Boolean))] as string[]
 
     const [studentsRes, coursesRes] = await Promise.all([
       supabase.from("students").select("id, full_name, branch_id").in("id", studentIds),
       supabase.from("courses").select("slug, name").in("slug", courseSlugs),
     ])
 
-    const studentsMap: Record<string, any> = Object.fromEntries((studentsRes.data || []).map((s: any) => [s.id, s]))
-    const coursesMap: Record<string, string> = Object.fromEntries((coursesRes.data || []).map((c: any) => [c.slug, c.name]))
+    const studentsMap: Record<string, StudentMapEntry> = Object.fromEntries((studentsRes.data || []).map((s) => [s.id, s]))
+    const coursesMap: Record<string, string> = Object.fromEntries((coursesRes.data || []).map((c) => [c.slug, c.name]))
 
-    const branchIds = [...new Set((studentsRes.data || []).map((s: any) => s.branch_id).filter(Boolean))] as string[]
+    const branchIds = [...new Set((studentsRes.data || []).map((s) => s.branch_id).filter(Boolean))] as string[]
     let branchesMap: Record<string, string> = {}
     if (branchIds.length > 0) {
       const { data: branchRows } = await supabase.from("branches").select("id, name").in("id", branchIds)
       if (branchRows) {
-        branchesMap = Object.fromEntries(branchRows.map((b: any) => [b.id, b.name]))
+        branchesMap = Object.fromEntries(branchRows.map((b) => [b.id, b.name]))
       }
     }
 
     const installMap = new Map<string, number>()
 
-    const parsed: Installment[] = rows.map((row: any) => {
+    const parsed: Installment[] = rows.map((row) => {
       const feeId = row.fee_id
       const count = (installMap.get(feeId) || 0) + 1
       installMap.set(feeId, count)
 
-      const student = studentsMap[row.fees?.student_id]
-      const branchName = student ? (branchesMap[student.branch_id] || "N/A") : "N/A"
+      const student = studentsMap[row.fees?.student_id ?? ""]
+      const branchName = student ? (branchesMap[student.branch_id ?? ""] || "N/A") : "N/A"
       const courseName = coursesMap[row.fees?.course_slug] || row.fees?.course_slug || "N/A"
 
       return {
@@ -203,6 +207,7 @@ export default function InstallmentsPage() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchInstallments()
   }, [fetchInstallments])
 
@@ -224,18 +229,18 @@ export default function InstallmentsPage() {
       supabase.from("courses").select("slug, name").in("slug", courseSlugs),
     ])
 
-    const coursesMap: Record<string, string> = Object.fromEntries((coursesRes.data || []).map((c: any) => [c.slug, c.name]))
+    const coursesMap: Record<string, string> = Object.fromEntries((coursesRes.data || []).map((c) => [c.slug, c.name]))
 
-    const branchIds = [...new Set((studentsRes.data || []).map((s: any) => s.branch_id).filter(Boolean))] as string[]
+    const branchIds = [...new Set((studentsRes.data || []).map((s) => s.branch_id).filter(Boolean))] as string[]
     let branchesMap: Record<string, string> = {}
     if (branchIds.length > 0) {
       const { data: branchRows } = await supabase.from("branches").select("id, name").in("id", branchIds)
       if (branchRows) {
-        branchesMap = Object.fromEntries(branchRows.map((b: any) => [b.id, b.name]))
+        branchesMap = Object.fromEntries(branchRows.map((b) => [b.id, b.name]))
       }
     }
 
-    const studentsMap: Record<string, any> = Object.fromEntries((studentsRes.data || []).map((s: any) => [s.id, s]))
+    const studentsMap: Record<string, StudentMapEntry> = Object.fromEntries((studentsRes.data || []).map((s) => [s.id, s]))
 
     const options: StudentOption[] = feesData.map((f) => {
       const s = studentsMap[f.student_id]
@@ -247,7 +252,7 @@ export default function InstallmentsPage() {
         feeId: f.id,
         total_fee: f.total_fee,
         paid_amount: f.paid_amount,
-        branch_name: branchesMap[s?.branch_id] ?? "N/A",
+        branch_name: branchesMap[s?.branch_id ?? ""] ?? "N/A",
       }
     })
 
@@ -261,8 +266,7 @@ export default function InstallmentsPage() {
     }
 
     setCreating(true)
-    const student = students.find((s) => s.id === selectedStudent && s.feeId === selectedStudent)
-      || students.find((s) => s.id === selectedStudent)
+    const student = students.find((s) => s.feeId === selectedStudent)
     if (!student) {
       toast("Student not found", { variant: "destructive" })
       setCreating(false)
@@ -314,25 +318,86 @@ export default function InstallmentsPage() {
     if (!payingId) return
     setPaying(true)
 
-    const { error } = await supabase
+    const inst = installments.find((i) => i.id === payingId)
+    if (!inst) {
+      toast("Installment not found", { variant: "destructive" })
+      setPaying(false)
+      return
+    }
+
+    const today = new Date().toISOString().split("T")[0]
+
+    const { error: updateErr } = await supabase
       .from("fee_installments")
       .update({
         status: "Paid",
-        paid_date: new Date().toISOString().split("T")[0],
+        paid_date: today,
       })
       .eq("id", payingId)
 
-    setPaying(false)
-
-    if (error) {
-      toast("Failed to mark as paid: " + error.message, { variant: "destructive" })
+    if (updateErr) {
+      toast("Failed to mark as paid: " + updateErr.message, { variant: "destructive" })
+      setPaying(false)
       return
     }
+
+    const { data: feeRow } = await supabase
+      .from("fees")
+      .select("id, paid_amount, pending_amount")
+      .eq("id", inst.feeId)
+      .maybeSingle()
+
+    if (feeRow) {
+      const newPaid = (feeRow.paid_amount || 0) + inst.amount
+      const newPending = Math.max(0, (feeRow.pending_amount || 0) - inst.amount)
+      await supabase.from("fees").update({ paid_amount: newPaid, pending_amount: newPending }).eq("id", inst.feeId)
+    }
+
+    await supabase.from("payments").insert({
+      id: `PAY-${new Date().getTime()}`,
+      student_id: inst.studentId === "N/A" ? null : inst.studentId,
+      student_name: inst.studentName === "Unknown" ? "Student" : inst.studentName,
+      course_slug: inst.course === "N/A" ? null : inst.course,
+      amount: inst.amount,
+      payment_date: today,
+      method: "cash",
+      status: "Paid",
+      description: `Installment payment — ${inst.label}`,
+    })
+
+    setPaying(false)
 
     toast("Installment marked as paid", { variant: "success" })
     setPayOpen(false)
     setPayingId(null)
     fetchInstallments()
+  }
+
+  const handleExport = () => {
+    if (filtered.length === 0) {
+      toast("Nothing to export", { variant: "destructive" })
+      return
+    }
+    const header = ["Student", "Student ID", "Course", "Installment", "Amount", "Due Date", "Paid Date", "Status", "Branch"]
+    const rows = [header, ...filtered.map((i) => [
+      i.studentName,
+      i.studentId,
+      i.course,
+      i.label,
+      String(i.amount),
+      i.dueDate,
+      i.paidDate ?? "",
+      i.status,
+      i.branch,
+    ])]
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `installments-${new Date().toISOString().split("T")[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const filtered = installments.filter((inst) => {
@@ -398,7 +463,7 @@ export default function InstallmentsPage() {
                   className="pl-8 w-64"
                 />
               </div>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={handleExport}>
                 <Download className="h-4 w-4" />
                 <span className="hidden sm:inline">Export</span>
               </Button>
@@ -530,7 +595,7 @@ export default function InstallmentsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {students.map((s) => (
-                    <SelectItem key={`${s.feeId}-${s.id}`} value={s.id}>
+                    <SelectItem key={s.feeId} value={s.feeId}>
                       {s.full_name} — {s.courseName} (Fee: ₹{s.total_fee.toLocaleString()})
                     </SelectItem>
                   ))}
@@ -554,7 +619,7 @@ export default function InstallmentsPage() {
             </div>
 
             {selectedStudent && (() => {
-              const s = students.find((st) => st.id === selectedStudent)
+              const s = students.find((st) => st.feeId === selectedStudent)
               if (!s) return null
               const count = parseInt(installmentCount)
               const remaining = s.total_fee - s.paid_amount

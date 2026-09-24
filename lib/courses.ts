@@ -57,9 +57,10 @@ export async function fetchCourseBySlug(slug: string): Promise<Course | null> {
     .from("courses")
     .select("*")
     .eq("slug", slug)
-    .single()
+    .eq("status", "active")
+    .maybeSingle()
 
-  if (error) throw error
+  if (error && error.code !== "PGRST116") throw error
   if (!data) return null
 
   return {

@@ -29,7 +29,7 @@ const coursesLinks = [
   { label: "Contact", href: "/#contact" },
 ]
 
-function ThemeToggle({ scrolled }: { scrolled: boolean }) {
+function ThemeToggle({ overlay }: { overlay: boolean }) {
   const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
@@ -38,7 +38,7 @@ function ThemeToggle({ scrolled }: { scrolled: boolean }) {
 
   if (!mounted) {
     return (
-      <button className="inline-flex size-8 items-center justify-center rounded-lg border border-white/20 text-white/70">
+      <button className="inline-flex size-8 items-center justify-center rounded-lg border border-border text-muted-foreground">
         <Monitor className="size-4" />
       </button>
     )
@@ -49,9 +49,9 @@ function ThemeToggle({ scrolled }: { scrolled: boolean }) {
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
       className={cn(
         "inline-flex size-8 items-center justify-center rounded-lg transition-colors",
-        scrolled
-          ? "border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-          : "border border-white/20 text-white/70 hover:bg-white/10 hover:text-white"
+        overlay
+          ? "border border-white/20 text-white/70 hover:bg-white/10 hover:text-white"
+          : "border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
       )}
       aria-label="Toggle theme"
     >
@@ -69,15 +69,23 @@ export function Header() {
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10)
+    onScroll()
     window.addEventListener("scroll", onScroll, { passive: true })
     return () => window.removeEventListener("scroll", onScroll)
   }, [])
+
+  // Transparent/white-text style only applies over the home hero.
+  // Everywhere else (courses, terms, privacy, or after scrolling) use the solid style.
+  const overlay = pathname === "/" && !scrolled
+  const solid = !overlay
+
+  const isActive = (href: string) => !href.includes("#") && href === pathname
 
   return (
     <header
       className={cn(
         "fixed top-0 left-0 right-0 z-50 border transition-all duration-300",
-        scrolled
+        solid
           ? "mx-2 mt-2 rounded-2xl border-border/50 bg-background/80 shadow-xl backdrop-blur-xl sm:mx-auto sm:mt-3 sm:w-[95%] sm:max-w-5xl lg:max-w-6xl"
           : "mx-4 mt-4 border-transparent bg-transparent sm:mx-auto sm:mt-6 sm:w-[95%] sm:max-w-7xl sm:rounded-b-2xl"
       )}
@@ -88,16 +96,20 @@ export function Header() {
             TNGC
           </div>
           <div className="hidden sm:block">
-            <p className={cn(
-              "text-sm font-bold leading-tight",
-              scrolled ? "text-foreground" : "text-white"
-            )}>
+            <p
+              className={cn(
+                "text-sm font-bold leading-tight",
+                overlay ? "text-white" : "text-foreground"
+              )}
+            >
               The New Generation
             </p>
-            <p className={cn(
-              "text-[10px] leading-tight",
-              scrolled ? "text-muted-foreground" : "text-white/70"
-            )}>
+            <p
+              className={cn(
+                "text-[10px] leading-tight",
+                overlay ? "text-white/70" : "text-muted-foreground"
+              )}
+            >
               Computers
             </p>
           </div>
@@ -106,73 +118,74 @@ export function Header() {
         {/* Desktop nav */}
         <nav className="hidden items-center gap-0.5 lg:flex">
           {navLinks.map((link) => (
-            <a
+            <Link
               key={link.href}
               href={link.href}
               className={cn(
                 "rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                scrolled ? "hover:bg-muted hover:text-foreground" : "text-white/80 hover:bg-white/10 hover:text-white",
-                (isCoursesPage ? link.href === "/" && pathname === "/" : link.href === "/courses" && pathname === "/courses")
-                  ? scrolled
-                    ? "text-foreground bg-muted"
-                    : "text-white bg-white/10"
-                  : scrolled
-                    ? "text-muted-foreground"
-                    : ""
+                overlay
+                  ? isActive(link.href)
+                    ? "text-white bg-white/10"
+                    : "text-white/80 hover:bg-white/10 hover:text-white"
+                  : isActive(link.href)
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
             >
               {link.label}
-            </a>
+            </Link>
           ))}
         </nav>
 
         {/* Desktop actions */}
         <div className="hidden items-center gap-2 lg:flex">
-          <ThemeToggle scrolled={scrolled} />
-          <a
+          <ThemeToggle overlay={overlay} />
+          <Link
             href="/auth/user/login"
             className={cn(
               buttonVariants({ variant: "ghost", size: "sm" }),
               "gap-1.5 text-sm",
-              scrolled
-                ? "text-muted-foreground hover:text-foreground"
-                : "text-white/80 hover:text-white hover:bg-white/10"
+              overlay
+                ? "text-white/80 hover:text-white hover:bg-white/10"
+                : "text-muted-foreground hover:text-foreground"
             )}
           >
             <LogIn className="size-3.5" />
             Login
-          </a>
-          <a
+          </Link>
+          <Link
             href="/auth/user/register"
             className={cn(
               buttonVariants({ size: "sm" }),
               "gap-1.5 text-sm",
-              scrolled
-                ? ""
-                : "bg-white text-black hover:bg-white/90"
+              overlay && "bg-white text-black hover:bg-white/90"
             )}
           >
             <UserPlus className="size-3.5" />
             Register
-          </a>
+          </Link>
         </div>
 
         {/* Mobile actions */}
         <div className="flex items-center gap-1.5 lg:hidden">
-          <ThemeToggle scrolled={scrolled} />
+          <ThemeToggle overlay={overlay} />
           <Sheet>
             <SheetTrigger
               className={cn(
                 "inline-flex size-8 items-center justify-center rounded-lg transition-colors",
-                scrolled
-                  ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  : "text-white hover:bg-white/10"
+                overlay
+                  ? "text-white hover:bg-white/10"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
               aria-label="Open menu"
             >
               <Menu className="size-5" />
             </SheetTrigger>
-            <SheetContent side="right" showCloseButton={false} className="w-[280px] p-0">
+            <SheetContent
+              side="right"
+              showCloseButton={false}
+              className="w-[min(280px,calc(100vw-2rem))] p-0"
+            >
               <SheetHeader className="border-b border-border px-4 py-3">
                 <SheetTitle className="flex items-center gap-2">
                   <div className="flex size-7 items-center justify-center rounded-lg bg-primary px-1 py-0.5 text-primary-foreground text-[10px] font-bold">
@@ -184,13 +197,18 @@ export function Header() {
 
               <nav className="flex-1 overflow-y-auto px-3 py-3">
                 {navLinks.map((link) => (
-                  <a
+                  <Link
                     key={link.href}
                     href={link.href}
-                    className="block rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    className={cn(
+                      "block rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted hover:text-foreground",
+                      isActive(link.href)
+                        ? "bg-muted text-foreground"
+                        : "text-muted-foreground"
+                    )}
                   >
                     {link.label}
-                  </a>
+                  </Link>
                 ))}
               </nav>
 
@@ -203,20 +221,20 @@ export function Header() {
                   8143248778
                 </a>
                 <div className="flex gap-2">
-                  <a
+                  <Link
                     href="/auth/user/login"
                     className={cn(buttonVariants({ variant: "outline", size: "sm" }), "flex-1 inline-flex items-center justify-center gap-1.5")}
                   >
                     <LogIn className="size-3.5" />
                     Login
-                  </a>
-                  <a
+                  </Link>
+                  <Link
                     href="/auth/user/register"
                     className={cn(buttonVariants({ size: "sm" }), "flex-1 inline-flex items-center justify-center gap-1.5")}
                   >
                     <UserPlus className="size-3.5" />
                     Register
-                  </a>
+                  </Link>
                 </div>
               </div>
             </SheetContent>

@@ -93,6 +93,8 @@ CREATE TABLE students (
   mother_name TEXT,
   alternate_phone TEXT,
   profile_photo TEXT,
+  present_status TEXT,
+  full_name_as_signature TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

@@ -51,8 +51,8 @@ export function AddTeacherSheet({ open, onOpenChange, onSuccess }: AddTeacherShe
       branch_id: branch || null,
       subjects: [],
       experience: experience ? parseInt(experience) : 0,
-      qualification: (qualification as any) || null,
-      specialization: (specialization as any) || null,
+      qualification: qualification || null,
+      specialization: specialization || null,
       salary: salary ? parseFloat(salary) : null,
       status: "Active",
     })

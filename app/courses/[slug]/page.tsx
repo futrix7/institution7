@@ -21,6 +21,8 @@ import { Badge } from "@/components/ui/badge"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
+import { Header } from "@/components/landing/header"
+import { Footer } from "@/components/landing/footer"
 
 export default function CourseDetailPage() {
   const params = useParams()
@@ -32,28 +34,43 @@ export default function CourseDetailPage() {
     if (!slug) return
     fetchCourseBySlug(slug)
       .then(setCourse)
+      .catch(() => setCourse(null))
       .finally(() => setLoading(false))
   }, [slug])
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">Loading course...</p>
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <p className="text-muted-foreground">Loading course...</p>
+        </div>
       </div>
     )
   }
 
   if (!course) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">Course not found.</p>
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
+          <p className="text-muted-foreground">Course not found.</p>
+          <Link
+            href="/courses"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
+          >
+            <ArrowLeft className="size-4" />
+            Browse All Courses
+          </Link>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
+      <Header />
+      <div className="mx-auto max-w-4xl px-4 pt-28 pb-8 sm:px-6 sm:pb-12 lg:px-8">
         <Link
           href="/courses"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground mb-6"
@@ -127,59 +144,83 @@ export default function CourseDetailPage() {
 
           <div className="mt-8">
             <h2 className="text-lg font-bold text-foreground">What You Will Learn</h2>
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {course.topics.map((topic) => (
-                <div
-                  key={topic}
-                  className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground"
-                >
-                  <CheckCircle2 className="size-4 shrink-0 text-primary" />
-                  {topic}
-                </div>
-              ))}
-            </div>
+            {course.topics.length > 0 ? (
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {course.topics.map((topic) => (
+                  <div
+                    key={topic}
+                    className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground"
+                  >
+                    <CheckCircle2 className="size-4 shrink-0 text-primary" />
+                    {topic}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Full syllabus is shared at the time of admission.
+              </p>
+            )}
           </div>
 
           <div className="mt-8">
             <h2 className="text-lg font-bold text-foreground">Tools & Technologies</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {course.tools.map((tool) => (
-                <span
-                  key={tool}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary"
-                >
-                  <Wrench className="size-3" />
-                  {tool}
-                </span>
-              ))}
-            </div>
+            {course.tools.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {course.tools.map((tool) => (
+                  <span
+                    key={tool}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary"
+                  >
+                    <Wrench className="size-3" />
+                    {tool}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Tools are covered as part of the curriculum.
+              </p>
+            )}
           </div>
 
           <div className="mt-8">
             <h2 className="text-lg font-bold text-foreground">Course Highlights</h2>
-            <ul className="mt-3 space-y-2">
-              {course.highlights.map((h) => (
-                <li key={h} className="flex items-start gap-2 text-sm text-muted-foreground">
-                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
-                  {h}
-                </li>
-              ))}
-            </ul>
+            {course.highlights.length > 0 ? (
+              <ul className="mt-3 space-y-2">
+                {course.highlights.map((h) => (
+                  <li key={h} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
+                    {h}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Contact us for detailed course highlights.
+              </p>
+            )}
           </div>
 
           <div className="mt-8">
             <h2 className="text-lg font-bold text-foreground">Career Opportunities</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {course.careerOpportunities.map((opp) => (
-                <span
-                  key={opp}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground"
-                >
-                  <Briefcase className="size-3 text-primary" />
-                  {opp}
-                </span>
-              ))}
-            </div>
+            {course.careerOpportunities.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {course.careerOpportunities.map((opp) => (
+                  <span
+                    key={opp}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground"
+                  >
+                    <Briefcase className="size-3 text-primary" />
+                    {opp}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Career guidance is provided after course completion.
+              </p>
+            )}
           </div>
 
           <div className="mt-8 flex flex-wrap gap-3">
@@ -203,6 +244,7 @@ export default function CourseDetailPage() {
           </div>
         </div>
       </div>
+      <Footer />
     </div>
   )
 }

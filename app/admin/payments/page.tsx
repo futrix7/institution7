@@ -27,6 +27,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ExportDialog } from "@/components/admin/export-dialog"
+import { RecordPaymentSheet } from "@/components/admin/record-payment-sheet"
 import { supabase } from "@/lib/supabase"
 import {
   BarChart,
@@ -80,6 +81,8 @@ export default function PaymentsPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
   const [exportOpen, setExportOpen] = useState(false)
+  const [recordOpen, setRecordOpen] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
   const [payments, setPayments] = useState<Payment[]>([])
   const [weeklyData, setWeeklyData] = useState<WeeklyDatum[]>([])
   const [loading, setLoading] = useState(true)
@@ -137,7 +140,7 @@ export default function PaymentsPage() {
     }
 
     fetchData()
-  }, [])
+  }, [reloadKey])
 
   const filteredPayments = payments.filter(
     (p) =>
@@ -172,7 +175,7 @@ export default function PaymentsPage() {
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
-          <Button size="sm">
+          <Button size="sm" onClick={() => setRecordOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Record Payment
           </Button>
@@ -291,7 +294,25 @@ export default function PaymentsPage() {
           </div>
         </CardContent>
       </Card>
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+      <ExportDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        rows={payments.map((p) => ({
+          ID: p.id,
+          Student: p.studentName,
+          Course: p.course,
+          Amount: p.amount,
+          Date: p.date,
+          Method: p.method,
+          Status: p.status,
+        }))}
+        filename="payments-report"
+      />
+      <RecordPaymentSheet
+        open={recordOpen}
+        onOpenChange={setRecordOpen}
+        onSuccess={() => setReloadKey((k) => k + 1)}
+      />
     </div>
   )
 }

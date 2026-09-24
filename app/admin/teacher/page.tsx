@@ -58,7 +58,7 @@ export default function TeachersPage() {
       return;
     }
 
-    const mapped: Teacher[] = (teachersData || []).map((t: any) => ({
+    const mapped: Teacher[] = (teachersData || []).map((t) => ({
       id: t.id,
       name: t.full_name,
       role: t.role,
@@ -75,6 +75,7 @@ export default function TeachersPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchTeachers();
   }, []);
 

@@ -102,6 +102,59 @@ export default function StudentPayments() {
   const totalPaid = payments.filter((p) => p.status === "Paid").reduce((s, p) => s + p.amount, 0)
   const totalPending = payments.filter((p) => p.status === "Pending").reduce((s, p) => s + p.amount, 0)
 
+  const downloadReceipt = (p: Payment) => {
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Receipt ${p.id}</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; padding: 40px; color: #1a202c; }
+  .receipt { max-width: 480px; margin: 0 auto; border: 2px dashed #16a34a; padding: 32px; background: #fff; }
+  .brand { text-align: center; margin-bottom: 20px; }
+  .brand h2 { margin: 0; color: #16a34a; letter-spacing: 1px; }
+  .brand p { margin: 4px 0 0; font-size: 11px; color: #718096; }
+  .title { text-align: center; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 20px; font-size: 13px; }
+  .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+  .row span:first-child { color: #718096; }
+  .amount { font-size: 15px; }
+  .amount span:last-child { font-weight: 700; color: #16a34a; }
+  .divider { border-top: 1px dashed #cbd5e0; margin: 12px 0; }
+  .thanks { text-align: center; font-size: 11px; color: #718096; margin-top: 16px; }
+  @media print { body { padding: 20px; } }
+</style>
+</head>
+<body>
+  <div class="receipt">
+    <div class="brand">
+      <h2>TNGC Computers</h2>
+      <p>The New Generation Computers</p>
+      <p>Ramanthapur, Hyderabad</p>
+    </div>
+    <div class="title">Payment Receipt</div>
+    <div class="row"><span>Receipt No</span><span>${p.receiptNo}</span></div>
+    <div class="row"><span>Payment ID</span><span>${p.id}</span></div>
+    <div class="row"><span>Student</span><span>${studentName || "—"}</span></div>
+    <div class="row"><span>Date</span><span>${p.date}</span></div>
+    <div class="row"><span>Description</span><span>${p.for}</span></div>
+    <div class="divider"></div>
+    <div class="row amount"><span>Amount Paid</span><span>₹${p.amount.toLocaleString("en-IN")}</span></div>
+    <div class="row"><span>Payment Method</span><span>${p.mode}</span></div>
+    <div class="row"><span>Status</span><span>${p.status}</span></div>
+    <div class="divider"></div>
+    <div class="thanks">Thank you for your payment!</div>
+  </div>
+  <script>window.onload = function () { window.print(); }</script>
+</body>
+</html>`
+
+    const win = window.open("", "_blank", "width=520,height=760")
+    if (!win) return
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -261,7 +314,7 @@ export default function StudentPayments() {
             <Button variant="outline" onClick={() => setReceiptPayment(null)}>Close</Button>
             <Button
               onClick={() => {
-                alert("PDF download will be available soon!")
+                if (receiptPayment) downloadReceipt(receiptPayment)
                 setReceiptPayment(null)
               }}
               className="gap-1.5"

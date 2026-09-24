@@ -115,6 +115,8 @@ export default function AdminFinancePage() {
   const [courseRevenue, setCourseRevenue] = useState<CourseRevenueItem[]>([]);
   const [branchData, setBranchData] = useState<BranchDatum[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
+  const [allTransactions, setAllTransactions] = useState<RecentTransaction[]>([]);
+  const [showAllTxns, setShowAllTxns] = useState(false);
 
   const handleVerify = useCallback(async () => {
     setLoading(true);
@@ -293,9 +295,8 @@ export default function AdminFinancePage() {
       setBranchData(branchItems);
 
       // Recent transactions
-      const recentTxns: RecentTransaction[] = transactions
+      const allTxns: RecentTransaction[] = transactions
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 10)
         .map((t) => ({
           date: new Date(t.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
           description: t.description,
@@ -303,7 +304,8 @@ export default function AdminFinancePage() {
           amount: formatCurrencyINR(Number(t.amount)),
           type: t.type,
         }));
-      setRecentTransactions(recentTxns);
+      setAllTransactions(allTxns);
+      setRecentTransactions(allTxns.slice(0, 10));
 
       setDataLoading(false);
     }
@@ -618,8 +620,8 @@ export default function AdminFinancePage() {
                       <CardTitle>Recent Transactions</CardTitle>
                       <CardDescription>Latest financial transactions</CardDescription>
                     </div>
-                    <Button variant="outline" size="sm">
-                      View All
+                    <Button variant="outline" size="sm" onClick={() => setShowAllTxns((s) => !s)}>
+                      {showAllTxns ? "Show Less" : "View All"}
                     </Button>
                   </div>
                 </CardHeader>
@@ -635,7 +637,7 @@ export default function AdminFinancePage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {recentTransactions.map((txn, index) => (
+                      {(showAllTxns ? allTransactions : recentTransactions).map((txn, index) => (
                         <TableRow key={index}>
                           <TableCell className="font-medium">{txn.date}</TableCell>
                           <TableCell>{txn.description}</TableCell>
@@ -674,7 +676,18 @@ export default function AdminFinancePage() {
           )}
         </>
       )}
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+      <ExportDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        rows={recentTransactions.map((t) => ({
+          Date: t.date,
+          Description: t.description,
+          Category: t.category,
+          Amount: t.amount,
+          Type: t.type,
+        }))}
+        filename="finance-report"
+      />
     </div>
   );
 }

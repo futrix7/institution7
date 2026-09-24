@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback, useEffect } from "react"
+import { useState, useRef, useCallback } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
@@ -42,6 +42,7 @@ import {
   CreditCard,
   CheckCircle2,
   RefreshCw,
+  Hash,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
@@ -107,6 +108,7 @@ const statusOptions = [
   { value: "Housewife", icon: Home },
   { value: "Employed",  icon: Briefcase },
   { value: "Business",  icon: Building2 },
+  { value: "Others",    icon: User },
 ]
 
 const slideVariants = {
@@ -166,48 +168,46 @@ export default function UserRegisterPage() {
   const [otpError, setOtpError] = useState("")
   const [sendingOtp, setSendingOtp] = useState(false)
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
-  const prevEmailRef = useRef(email)
 
-  useEffect(() => {
-    if (prevEmailRef.current !== email && step >= 2) {
-      if (otpVerified || otpSent) {
-        setOtpVerified(false)
-        setOtpSent(false)
-        setOtpCode(["", "", "", "", "", ""])
-        setOtpError("")
-        toast("Email changed — please verify the new email", {
-          variant: "info",
-          action: {
-            label: "Send OTP",
-            onClick: () => {
-              setSendingOtp(true)
-              fetch("/api/send-otp", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email }),
-              }).then((res) => {
-                if (res.ok) {
-                  setOtpSent(true)
-                  toast("OTP sent to your email", { variant: "success" })
-                  setTimeout(() => otpRefs.current[0]?.focus(), 100)
-                } else {
-                  setOtpError("Failed to send OTP")
-                }
-              }).catch(() => {
+  function handleEmailChange(value: string) {
+    setEmail(value)
+    if (step >= 2 && (otpVerified || otpSent)) {
+      setOtpVerified(false)
+      setOtpSent(false)
+      setOtpCode(["", "", "", "", "", ""])
+      setOtpError("")
+      toast("Email changed — please verify the new email", {
+        variant: "info",
+        action: {
+          label: "Send OTP",
+          onClick: () => {
+            setSendingOtp(true)
+            fetch("/api/send-otp", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email: value }),
+            }).then((res) => {
+              if (res.ok) {
+                setOtpSent(true)
+                toast("OTP sent to your email", { variant: "success" })
+                setTimeout(() => otpRefs.current[0]?.focus(), 100)
+              } else {
                 setOtpError("Failed to send OTP")
-              }).finally(() => {
-                setSendingOtp(false)
-              })
-            },
+              }
+            }).catch(() => {
+              setOtpError("Failed to send OTP")
+            }).finally(() => {
+              setSendingOtp(false)
+            })
           },
-        })
-      }
+        },
+      })
     }
-    prevEmailRef.current = email
-  }, [email, step, otpVerified, otpSent, toast])
+  }
 
   const [paymentDone, setPaymentDone] = useState(false)
   const [confirmingPayment, setConfirmingPayment] = useState(false)
+  const [paymentReference, setPaymentReference] = useState("")
 
   const steps = [
     { id: 1, title: "Personal Info",     icon: User,      description: "Tell us about yourself" },
@@ -270,6 +270,31 @@ export default function UserRegisterPage() {
     }
   }
 
+  async function verifyOtpCode(code: string) {
+    setOtpVerifying(true)
+    setOtpError("")
+    try {
+      const res = await fetch("/api/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code }),
+      })
+      if (res.ok) {
+        setOtpVerified(true)
+        toast("Email verified successfully!", { variant: "success" })
+      } else {
+        const data = await res.json()
+        setOtpError(data.error || "Invalid OTP")
+        setOtpCode(["", "", "", "", "", ""])
+        otpRefs.current[0]?.focus()
+      }
+    } catch {
+      setOtpError("Verification failed. Please try again.")
+    } finally {
+      setOtpVerifying(false)
+    }
+  }
+
   const handleOtpChange = useCallback((index: number, value: string) => {
     if (!/^\d*$/.test(value)) return
     const newOtp = [...otpCode]
@@ -303,52 +328,11 @@ export default function UserRegisterPage() {
     }
   }
 
-  async function verifyOtpCode(code: string) {
-    setOtpVerifying(true)
-    setOtpError("")
-    try {
-      const res = await fetch("/api/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code }),
-      })
-      if (res.ok) {
-        setOtpVerified(true)
-        toast("Email verified successfully!", { variant: "success" })
-      } else {
-        const data = await res.json()
-        setOtpError(data.error || "Invalid OTP")
-        setOtpCode(["", "", "", "", "", ""])
-        otpRefs.current[0]?.focus()
-      }
-    } catch {
-      setOtpError("Verification failed. Please try again.")
-    } finally {
-      setOtpVerifying(false)
-    }
-  }
-
   async function handlePaymentConfirm() {
     setConfirmingPayment(true)
-    const totalFee = getTotalFee(selectedCourses)
-
-    const { count } = await supabase
-      .from("students")
-      .select("id", { count: "exact", head: true })
-
-    const paymentId = `PAY-${new Date().getFullYear()}-${String((count ?? 0) + 1).padStart(4, "0")}`
-
-    await supabase.from("payments").insert({
-      id: paymentId,
-      email: email,
-      amount: totalFee,
-      status: "pending",
-      method: "upi",
-    })
-
     setPaymentDone(true)
     setConfirmingPayment(false)
-    toast("Payment confirmed! Completing registration...", { variant: "success" })
+    toast("Payment noted! Our team will verify it after submission.", { variant: "success" })
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -374,13 +358,23 @@ export default function UserRegisterPage() {
       return
     }
 
+    if (!presentStatus) {
+      toast("Please select your present status", { variant: "destructive" })
+      return
+    }
+
+    if (!signature) {
+      toast("Please type your full name as signature", { variant: "destructive" })
+      return
+    }
+
     setSubmitting(true)
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { full_name: fullName },
+        data: { full_name: fullName, phone, present_status: presentStatus },
       },
     })
 
@@ -401,9 +395,12 @@ export default function UserRegisterPage() {
       .from("students")
       .select("id", { count: "exact", head: true })
 
-    const studentId = `STU-${new Date().getFullYear()}-${String((count ?? 0) + 1).padStart(3, "0")}`
-    const primaryCourse = selectedCourses[0]
-    const courseSlug = courseInfo[primaryCourse]?.slug || primaryCourse.toLowerCase().replace(/\s+/g, "-")
+    const year = new Date().getFullYear()
+    const studentId = `STU-${year}-${String((count ?? 0) + 1).padStart(3, "0")}`
+    const courseSlugs = selectedCourses
+      .map((c) => courseInfo[c]?.slug)
+      .filter((s): s is string => Boolean(s))
+    const primaryCourse = courseSlugs[0]
 
     const { error: studentError } = await supabase.from("students").insert({
       id: studentId,
@@ -414,8 +411,10 @@ export default function UserRegisterPage() {
       father_name: fatherName,
       father_phone: parentMobile || null,
       branch_id: branch || null,
-      course_slug: courseSlug,
+      course_slug: primaryCourse,
       status: "Active",
+      present_status: presentStatus,
+      full_name_as_signature: signature,
     })
 
     if (studentError) {
@@ -425,39 +424,53 @@ export default function UserRegisterPage() {
     }
 
     const feeNumeric = getTotalFee(selectedCourses)
+    const today = new Date().toISOString().split("T")[0]
 
-    await supabase.from("fees").insert({
-      student_id: studentId,
-      course_slug: courseSlug,
-      total_fee: feeNumeric,
-      paid_amount: feeNumeric,
-      pending_amount: 0,
-    })
-
-    if (feeNumeric > 0) {
-      const { data: feeRow } = await supabase
+    // Create a fee record + installment for every selected course
+    for (const slug of courseSlugs) {
+      const courseFee = getTotalFee(selectedCourses.filter((c) => courseInfo[c]?.slug === slug))
+      const { data: feeRow, error: feeError } = await supabase
         .from("fees")
+        .insert({
+          student_id: studentId,
+          course_slug: slug,
+          total_fee: courseFee,
+          paid_amount: 0,
+          pending_amount: courseFee,
+        })
         .select("id")
-        .eq("student_id", studentId)
         .single()
 
-      if (feeRow) {
-        const now = new Date()
+      if (!feeError && feeRow) {
         await supabase.from("fee_installments").insert({
           fee_id: feeRow.id,
-          label: "Full Payment",
-          amount: feeNumeric,
-          due_date: now.toISOString().split("T")[0],
-          status: "Paid",
+          label: "Registration Fee",
+          amount: courseFee,
+          due_date: today,
+          status: "Pending",
         })
       }
     }
 
-    await supabase
-      .from("payments")
-      .update({ status: "completed", student_id: studentId })
-      .eq("email", email)
-      .eq("status", "pending")
+    // Record the payment as pending (admin verifies before marking Paid)
+    const paymentId = `PAY-${year}-${String((count ?? 0) + 1).padStart(4, "0")}`
+    const { error: payError } = await supabase.from("payments").insert({
+      id: paymentId,
+      student_id: studentId,
+      student_name: fullName,
+      course_slug: primaryCourse,
+      amount: feeNumeric,
+      payment_date: today,
+      method: "upi",
+      status: "Pending",
+      description: paymentReference
+        ? `UPI Reference: ${paymentReference}`
+        : "Registration fee via UPI",
+    })
+
+    if (payError) {
+      console.warn("Payment record could not be created:", payError.message)
+    }
 
     toast("Account created successfully! Please sign in.", { variant: "success" })
     router.push("/auth/user/login")
@@ -596,7 +609,7 @@ export default function UserRegisterPage() {
                                 <Label htmlFor="email">Email Address *</Label>
                                 <div className="relative">
                                   <Mail className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                                  <Input id="email" type="email" placeholder="you@example.com" className="h-10 pl-10" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                                  <Input id="email" type="email" placeholder="you@example.com" className="h-10 pl-10" value={email} onChange={(e) => handleEmailChange(e.target.value)} required />
                                 </div>
                               </div>
                               <div className="space-y-2">
@@ -655,7 +668,7 @@ export default function UserRegisterPage() {
                                       Enter the 6-digit code sent to <span className="font-semibold text-foreground">{email}</span>
                                     </p>
 
-                                    <div className="flex justify-center gap-2">
+                                    <div className="flex justify-center gap-1.5 sm:gap-2">
                                       {otpCode.map((digit, i) => (
                                         <input
                                           key={i}
@@ -668,7 +681,7 @@ export default function UserRegisterPage() {
                                           onKeyDown={(e) => handleOtpKeyDown(i, e)}
                                           onPaste={handleOtpPaste}
                                           className={cn(
-                                            "size-12 text-center text-lg font-bold rounded-xl border-2 transition-all",
+                                            "size-10 text-center text-lg font-bold rounded-xl border-2 transition-all sm:size-12",
                                             "bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30",
                                             digit ? "border-primary" : "border-border",
                                             otpError && "border-red-500"
@@ -816,105 +829,6 @@ export default function UserRegisterPage() {
                           </>
                         )}
 
-                        {step === 3 && (
-                          <>
-                            <div className="mb-4">
-                              <h2 className="text-lg font-bold text-foreground">Verify Your Email</h2>
-                              <p className="text-sm text-muted-foreground">We&apos;ll send a 6-digit code to <span className="font-semibold text-foreground">{email}</span></p>
-                            </div>
-
-                            {otpVerified ? (
-                              <div className="flex flex-col items-center py-8">
-                                <div className="flex size-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950/40">
-                                  <CheckCircle2 className="size-8 text-emerald-600 dark:text-emerald-400" />
-                                </div>
-                                <p className="mt-4 text-lg font-bold text-foreground">Email Verified!</p>
-                                <p className="mt-1 text-sm text-muted-foreground">Your email has been successfully verified.</p>
-                              </div>
-                            ) : (
-                              <div className="space-y-4">
-                                {!otpSent ? (
-                                  <div className="flex flex-col items-center py-6">
-                                    <div className="flex size-16 items-center justify-center rounded-full bg-primary/10">
-                                      <Shield className="size-8 text-primary" />
-                                    </div>
-                                    <p className="mt-4 text-sm text-muted-foreground text-center">
-                                      Click the button below to send a verification code to your email address.
-                                    </p>
-                                    <Button
-                                      type="button"
-                                      onClick={handleSendOtp}
-                                      className="mt-4 gap-2"
-                                      disabled={sendingOtp}
-                                    >
-                                      {sendingOtp ? (
-                                        <Loader2 className="size-4 animate-spin" />
-                                      ) : (
-                                        <Mail className="size-4" />
-                                      )}
-                                      {sendingOtp ? "Sending OTP..." : "Send Verification Code"}
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-4">
-                                    <p className="text-center text-sm text-muted-foreground">
-                                      Enter the 6-digit code sent to <span className="font-semibold text-foreground">{email}</span>
-                                    </p>
-
-                                    <div className="flex justify-center gap-2">
-                                      {otpCode.map((digit, i) => (
-                                        <input
-                                          key={i}
-                                          ref={(el) => { otpRefs.current[i] = el }}
-                                          type="text"
-                                          inputMode="numeric"
-                                          maxLength={1}
-                                          value={digit}
-                                          onChange={(e) => handleOtpChange(i, e.target.value)}
-                                          onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                                          onPaste={handleOtpPaste}
-                                          className={cn(
-                                            "size-12 text-center text-lg font-bold rounded-xl border-2 transition-all",
-                                            "bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30",
-                                            digit ? "border-primary" : "border-border",
-                                            otpError && "border-red-500"
-                                          )}
-                                          disabled={otpVerifying}
-                                        />
-                                      ))}
-                                    </div>
-
-                                    {otpVerifying && (
-                                      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                                        <Loader2 className="size-4 animate-spin" />
-                                        Verifying...
-                                      </div>
-                                    )}
-
-                                    {otpError && (
-                                      <p className="text-center text-sm text-red-500">{otpError}</p>
-                                    )}
-
-                                    <div className="flex justify-center">
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={handleSendOtp}
-                                        disabled={sendingOtp}
-                                        className="gap-1.5 text-xs"
-                                      >
-                                        <RefreshCw className="size-3" />
-                                        Resend OTP
-                                      </Button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        )}
-
                         {step === 4 && (
                           <>
                             <div className="mb-4">
@@ -926,7 +840,7 @@ export default function UserRegisterPage() {
                               <div className="rounded-xl border border-border bg-muted/30 p-4">
                                 <div className="flex items-center justify-between mb-3">
                                   <span className="text-sm font-medium text-muted-foreground">Course(s)</span>
-                                  <span className="text-sm font-semibold text-foreground">{selectedCourses.join(", ")}</span>
+                                  <span className="text-sm font-semibold text-foreground text-right">{selectedCourses.join(", ")}</span>
                                 </div>
                                 <div className="flex items-center justify-between border-t border-border pt-3">
                                   <span className="text-sm font-medium text-muted-foreground">Total Fee</span>
@@ -951,6 +865,20 @@ export default function UserRegisterPage() {
                               <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground text-center space-y-1">
                                 <p>Pay <span className="font-bold text-foreground">₹{totalFee.toLocaleString("en-IN")}</span> to the UPI ID above</p>
                                 <p>After payment, click the button below to confirm</p>
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label htmlFor="paymentReference">UPI Transaction Reference (optional)</Label>
+                                <div className="relative">
+                                  <Hash className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                                  <Input
+                                    id="paymentReference"
+                                    placeholder="e.g. UPI/UTR reference number"
+                                    className="h-10 pl-10"
+                                    value={paymentReference}
+                                    onChange={(e) => setPaymentReference(e.target.value)}
+                                  />
+                                </div>
                               </div>
 
                               <div className="flex justify-center">
@@ -987,29 +915,29 @@ export default function UserRegisterPage() {
                             </div>
 
                             <div className="rounded-xl border border-border bg-muted/30 p-4 mb-4">
-                              <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                                 <div>
                                   <span className="text-muted-foreground">Name:</span>
-                                  <p className="font-semibold text-foreground">{fullName}</p>
+                                  <p className="font-semibold text-foreground break-words">{fullName}</p>
                                 </div>
                                 <div>
                                   <span className="text-muted-foreground">Email:</span>
-                                  <p className="font-semibold text-foreground">{email}</p>
+                                  <p className="font-semibold text-foreground break-words">{email}</p>
                                 </div>
                                 <div>
                                   <span className="text-muted-foreground">Course:</span>
-                                  <p className="font-semibold text-foreground">{selectedCourses.join(", ")}</p>
+                                  <p className="font-semibold text-foreground break-words">{selectedCourses.join(", ")}</p>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Fee Paid:</span>
-                                  <p className="font-semibold text-emerald-600 dark:text-emerald-400">₹{totalFee.toLocaleString("en-IN")}</p>
+                                  <span className="text-muted-foreground">Fee to Pay:</span>
+                                  <p className="font-semibold text-amber-600 dark:text-amber-400">₹{totalFee.toLocaleString("en-IN")} (pending verification)</p>
                                 </div>
                               </div>
                             </div>
 
                             <div className="space-y-2">
                               <Label>Present Status *</Label>
-                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                                 {statusOptions.map((opt) => {
                                   const Icon = opt.icon
                                   const selected = presentStatus === opt.value
@@ -1120,8 +1048,8 @@ export default function UserRegisterPage() {
                         className="gap-1.5 px-6"
                         disabled={
                           (step === 1 && (!fullName || !fatherName || !email || !phone)) ||
-                          (step === 2 && (!branch || selectedCourses.length === 0)) ||
-                          (step === 3 && !otpVerified) ||
+                          (step === 2 && !otpVerified) ||
+                          (step === 3 && (!branch || selectedCourses.length === 0)) ||
                           (step === 4 && !paymentDone)
                         }
                       >

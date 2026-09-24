@@ -1,7 +1,7 @@
 "use client"
 
-import { Phone, MapPin } from "lucide-react"
-import { FaFacebook, FaTwitter, FaInstagram, FaYoutube, FaLinkedin } from "react-icons/fa"
+import { Phone, MapPin, MessageCircle } from "lucide-react"
+import { FaWhatsapp } from "react-icons/fa"
 const quickLinks = [
   { label: "Courses", href: "/courses" },
   { label: "Staff", href: "#staff" },
@@ -10,11 +10,9 @@ const quickLinks = [
 ]
 
 const socialLinks = [
-  { icon: FaFacebook, href: "#", label: "Facebook" },
-  { icon: FaTwitter, href: "#", label: "Twitter" },
-  { icon: FaInstagram, href: "#", label: "Instagram" },
-  { icon: FaYoutube, href: "#", label: "YouTube" },
-  { icon: FaLinkedin, href: "#", label: "LinkedIn" },
+  { icon: FaWhatsapp, href: "https://wa.me/918143248778", label: "WhatsApp" },
+  { icon: MessageCircle, href: "https://wa.me/919550192527", label: "WhatsApp 2" },
+  { icon: Phone, href: "tel:8143248778", label: "Phone" },
 ]
 
 export function Footer() {

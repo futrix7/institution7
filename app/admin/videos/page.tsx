@@ -81,6 +81,7 @@ export default function VideosPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchVideos()
   }, [])
 

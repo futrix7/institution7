@@ -92,7 +92,7 @@ export default function AdminCertificatesPage() {
       return
     }
 
-    const mapped: Certificate[] = (data || []).map((row: any) => ({
+    const mapped: Certificate[] = (data || []).map((row) => ({
       id: row.id,
       studentName: row.student_name,
       studentId: row.student_id,
@@ -108,12 +108,34 @@ export default function AdminCertificatesPage() {
   }
 
   async function fetchStudents() {
-    const { data: studentsData } = await supabase
-      .from("students")
-      .select("id, full_name, course_slug")
-      .order("full_name")
+    const [studentsRes, instRes] = await Promise.all([
+      supabase.from("students").select("id, full_name, course_slug").order("full_name"),
+      supabase.from("fee_installments").select("fee_id, status"),
+    ])
 
-    if (!studentsData) return
+    const installmentRows = instRes.data || []
+    const byFee = new Map<string, string[]>()
+    installmentRows.forEach((row) => {
+      const arr = byFee.get(row.fee_id) || []
+      arr.push(row.status)
+      byFee.set(row.fee_id, arr)
+    })
+
+    const { data: feesData } = await supabase.from("fees").select("id, student_id")
+    const eligibleStudents = new Set(
+      (feesData || [])
+        .filter((f) => {
+          const statuses = byFee.get(f.id)
+          return !!statuses && statuses.length > 0 && statuses.every((s) => s === "Paid")
+        })
+        .map((f) => f.student_id)
+    )
+
+    const studentsData = (studentsRes.data || []).filter((s) => eligibleStudents.has(s.id))
+    if (studentsData.length === 0) {
+      setStudents([])
+      return
+    }
 
     const courseSlugs = [...new Set(studentsData.map((s) => s.course_slug).filter(Boolean))] as string[]
     let coursesMap: Record<string, string> = {}
@@ -124,7 +146,7 @@ export default function AdminCertificatesPage() {
         .select("slug, name")
         .in("slug", courseSlugs)
       if (coursesData) {
-        coursesMap = Object.fromEntries(coursesData.map((c: any) => [c.slug, c.name]))
+        coursesMap = Object.fromEntries(coursesData.map((c) => [c.slug, c.name]))
       }
     }
 
@@ -139,11 +161,13 @@ export default function AdminCertificatesPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchCertificates()
   }, [])
 
   useEffect(() => {
     if (issueOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- load student list when dialog opens
       fetchStudents()
     }
   }, [issueOpen])
@@ -321,7 +345,7 @@ export default function AdminCertificatesPage() {
               Issue Certificate
             </DialogTitle>
             <DialogDescription>
-              Issue a course completion certificate to a student
+              Only students who have completed all their installments can receive a certificate
             </DialogDescription>
           </DialogHeader>
 
@@ -340,6 +364,11 @@ export default function AdminCertificatesPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {students.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No students have completed all their installments yet.
+                </p>
+              )}
             </div>
 
             <div className="space-y-1.5">

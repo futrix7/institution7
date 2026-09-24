@@ -119,6 +119,7 @@ export default function StudentInstallmentsPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchData()
   }, [student])
 

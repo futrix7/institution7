@@ -16,6 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
 import { Header } from "@/components/landing/header"
+import { Footer } from "@/components/landing/footer"
 
 function CourseCard({ course }: { course: Course }) {
   return (
@@ -106,6 +107,7 @@ export default function CoursesPage() {
   useEffect(() => {
     fetchCourses()
       .then(setCourses)
+      .catch(() => setCourses([]))
       .finally(() => setLoading(false))
   }, [])
 
@@ -156,6 +158,11 @@ export default function CoursesPage() {
             {longTerm.map((course) => (
               <CourseCard key={course.slug} course={course} />
             ))}
+            {longTerm.length === 0 && (
+              <p className="col-span-full text-center text-sm text-muted-foreground py-8">
+                Long-term courses are being updated. Contact us for batch details.
+              </p>
+            )}
           </div>
         </div>
 
@@ -171,9 +178,15 @@ export default function CoursesPage() {
             {shortTerm.map((course) => (
               <CourseCard key={course.slug} course={course} />
             ))}
+            {shortTerm.length === 0 && (
+              <p className="col-span-full text-center text-sm text-muted-foreground py-8">
+                Short-term courses are being updated. Contact us for batch details.
+              </p>
+            )}
           </div>
         </div>
       </div>
+      <Footer />
     </div>
   )
 }

@@ -55,7 +55,7 @@ export function AddCourseSheet({ open, onOpenChange, onSuccess }: AddCourseSheet
       full_description: description.trim() || courseName.trim(),
       topics: topics ? topics.split(",").map((t) => t.trim()).filter(Boolean) : [],
       fees: fee ? `₹${Number(fee).toLocaleString("en-IN")}` : "₹0",
-      fee_numeric: fee ? parseInt(fee) : 0,
+      fee_numeric: fee ? (parseInt(fee) || 0) : 0,
       eligibility: eligibility || "Any",
       certification: "Course Completion Certificate",
       certification_body: "TNGC Institute",

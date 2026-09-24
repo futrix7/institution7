@@ -1,14 +1,16 @@
+import Link from "next/link"
+
 export default function TermsPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 h-12 border-b border-border bg-card">
         <div className="flex h-full items-center px-4">
-          <a href="/student/dashboard" className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
             <div className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-[10px] font-extrabold">
               TNGC
             </div>
-            <span className="text-sm font-bold">Student Portal</span>
-          </a>
+            <span className="text-sm font-bold">The New Generation Computers</span>
+          </Link>
         </div>
       </header>
 
@@ -90,8 +92,9 @@ export default function TermsPage() {
             <div className="text-sm text-muted-foreground mt-2 space-y-1">
               <p>The New Generation Computers</p>
               <p>Ramanthapur, Hyderabad, Telangana</p>
-              <p>Phone: +91 98765 43210</p>
-              <p>Email: info@tngc.in</p>
+              <p>Phone: +91 81432 48778 </p>
+              <p>Phone: +91 95501 92527</p>
+              <p>Email: contact@tngcinstitute.com</p>
             </div>
           </section>
         </div>

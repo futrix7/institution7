@@ -13,7 +13,6 @@ import {
   Sun,
   Moon,
 } from "lucide-react"
-import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 
 const navLinks = [
@@ -33,12 +32,12 @@ function ThemeToggle() {
   return (
     <button
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-      className="inline-flex min-h-11 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:min-h-12 sm:w-11"
+      className="inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       aria-label="Toggle theme"
     >
       {mounted
-        ? theme === "dark" ? <Sun className="size-4 sm:size-5" /> : <Moon className="size-4 sm:size-5" />
-        : <Sun className="size-4 sm:size-5" />
+        ? theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />
+        : <Sun className="size-4" />
       }
     </button>
   )
@@ -47,73 +46,67 @@ function ThemeToggle() {
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
+  const isActive = (href: string) => pathname === href
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Desktop top nav */}
-      <header className="hidden lg:block sticky top-0 z-40 border-b border-border bg-card/90 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-6">
-          <Link href="/student/dashboard" className="text-base font-bold tracking-tight">
-            Student Portal
-          </Link>
-          <nav className="flex items-center gap-1">
-            {navLinks.map((link) => {
-              const isActive = pathname === link.href
-              return (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={cn(
-                    "relative flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                    isActive
-                      ? "text-primary bg-primary/10"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                  )}
-                >
-                  <link.icon className="size-4" />
-                  <span>{link.label}</span>
-                </Link>
-              )
-            })}
-            <div className="mx-2 h-5 w-px bg-border" />
-            <ThemeToggle />
-          </nav>
+    <div className="flex h-screen overflow-hidden bg-background">
+      {/* Desktop sidebar */}
+      <aside className="hidden lg:flex w-60 shrink-0 flex-col border-r border-border bg-card">
+        <div className="flex h-14 items-center gap-2 border-b border-border px-4">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-primary px-1 py-0.5 text-primary-foreground text-[10px] font-extrabold">
+            TNGC
+          </div>
+          <span className="text-sm font-bold">Student Portal</span>
         </div>
-      </header>
 
-      <main className={cn("pb-20 lg:pb-6")}>{children}</main>
-
-      {/* Mobile bottom nav - floating dock */}
-      <div className="fixed bottom-3 left-1/2 z-40 -translate-x-1/2 lg:hidden">
-        <nav className="flex items-center gap-0.5 rounded-2xl border border-border bg-card/90 px-1.5 py-1 shadow-lg backdrop-blur-md">
-          {navLinks.map((link) => {
-            const isActive = pathname === link.href
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={cn(
-                  "relative flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl px-2.5 py-1.5 text-[9px] font-medium transition-all sm:min-h-12 sm:px-3 sm:py-2 sm:text-[10px]",
-                  isActive
-                    ? "text-primary"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {isActive && (
-                  <motion.div
-                    layoutId="bottom-nav-active"
-                    className="absolute inset-0 rounded-xl bg-primary/10"
-                    transition={{ type: "spring", stiffness: 350, damping: 30 }}
-                  />
-                )}
-                <link.icon className="relative size-4 sm:size-5" />
-                <span className="relative">{link.label}</span>
-              </Link>
-            )
-          })}
-          <div className="mx-0.5 h-5 w-px bg-border" />
-          <ThemeToggle />
+        <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-1 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
+          {navLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={cn(
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                isActive(link.href)
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <link.icon className="size-4" />
+              {link.label}
+            </Link>
+          ))}
         </nav>
+
+        <div className="border-t border-border p-3">
+          <ThemeToggle />
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <main className="flex-1 overflow-y-auto pb-20 lg:pb-6">{children}</main>
       </div>
+
+      {/* Mobile classic bottom nav */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-card lg:hidden">
+        <div className="flex items-center justify-around px-1.5 py-1">
+          {navLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={cn(
+                "flex flex-1 min-w-0 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] font-medium transition-colors",
+                isActive(link.href) ? "text-primary" : "text-muted-foreground"
+              )}
+            >
+              <link.icon className="size-5" />
+              <span className="whitespace-nowrap">{link.label}</span>
+            </Link>
+          ))}
+          <div className="mx-0.5 h-6 w-px shrink-0 bg-border" />
+          <ThemeToggle />
+        </div>
+      </nav>
     </div>
   )
 }

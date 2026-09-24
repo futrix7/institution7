@@ -678,7 +678,27 @@ export default function AnalyticsPage() {
         </Card>
       </div>
 
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+      <ExportDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        rows={[
+          ...topCourses.map((c) => ({
+            Rank: c.rank,
+            Course: c.name,
+            Enrollments: c.enrollments,
+            "Completion Rate": `${c.completionRate}%`,
+            Revenue: c.revenue,
+          })),
+          ...enrollments.map((e) => ({
+            Rank: "",
+            Course: `${e.month} Enrollments`,
+            Enrollments: e.value,
+            "Completion Rate": "",
+            Revenue: "",
+          })),
+        ]}
+        filename="analytics-report"
+      />
     </div>
   );
 }

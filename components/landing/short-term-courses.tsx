@@ -27,15 +27,29 @@ export function ShortTermCourses() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let active = true
+
     async function fetchCourses() {
-      const { data } = await supabase
-        .from("courses")
-        .select("slug, name, duration")
-        .eq("type", "short-term")
-      setCourses(data ?? [])
-      setLoading(false)
+      try {
+        const { data, error } = await supabase
+          .from("courses")
+          .select("slug, name, duration")
+          .eq("type", "short-term")
+          .eq("status", "active")
+          .order("created_at")
+
+        if (active) setCourses(error ? [] : (data ?? []))
+      } catch {
+        if (active) setCourses([])
+      } finally {
+        if (active) setLoading(false)
+      }
     }
+
     fetchCourses()
+    return () => {
+      active = false
+    }
   }, [])
 
   return (
@@ -67,6 +81,10 @@ export function ShortTermCourses() {
               <div key={i} className="h-12 animate-pulse rounded-xl border border-border/60 bg-muted/50" />
             ))}
           </div>
+        ) : courses.length === 0 ? (
+          <p className="mt-12 text-center text-sm text-muted-foreground">
+            Short-term courses are being updated. Contact us for the latest batch details.
+          </p>
         ) : (
           <motion.div
             variants={containerVariants}

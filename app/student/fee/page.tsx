@@ -52,6 +52,7 @@ export default function StudentFee() {
   const [feeId, setFeeId] = useState<string | null>(null)
   const [studentId, setStudentId] = useState<string | null>(null)
   const [courseSlug, setCourseSlug] = useState<string | null>(null)
+  const [studentName, setStudentName] = useState("")
 
   const paidPct = feeDetails.totalFee > 0 ? Math.round((feeDetails.paid / feeDetails.totalFee) * 100) : 0
   const extrasTotal = feeDetails.extras.reduce((sum, e) => sum + e.amount, 0)
@@ -71,7 +72,7 @@ export default function StudentFee() {
 
       const { data: student } = await supabase
         .from("students")
-        .select("id, course_slug")
+        .select("id, course_slug, full_name")
         .eq("user_id", user.id)
         .single()
 
@@ -79,6 +80,7 @@ export default function StudentFee() {
 
       setStudentId(student.id)
       setCourseSlug(student.course_slug)
+      setStudentName(student.full_name ?? "")
 
       const { data: fee } = await supabase
         .from("fees")
@@ -141,12 +143,12 @@ export default function StudentFee() {
     const payAmount = Number(amount)
     const paymentId = `PAY-${Date.now()}`
 
-    const studentName = feeDetails.course
+    const studentNameValue = studentName || feeDetails.course
 
     const { error: paymentErr } = await supabase.from("payments").insert({
       id: paymentId,
       student_id: studentId,
-      student_name: studentName,
+      student_name: studentNameValue,
       course_slug: courseSlug,
       amount: payAmount,
       payment_date: new Date().toISOString().split("T")[0],

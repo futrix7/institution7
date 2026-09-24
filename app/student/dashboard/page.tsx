@@ -15,23 +15,24 @@ import {
   Loader2,
 } from "lucide-react"
 import Link from "next/link"
+import { cn } from "@/lib/utils"
 
 interface StudentRow {
-  id: number
+  id: string
   user_id: string
-  name: string
-  course: string
-  branch: string
+  full_name: string
+  course_slug: string | null
+  branch_id: string | null
 }
 
 interface FeeRow {
-  amount_paid: number
+  paid_amount: number
 }
 
 interface AnnouncementRow {
   title: string
-  date: string
-  type: string
+  published_date: string
+  priority: string
 }
 
 export default function StudentDashboard() {
@@ -71,18 +72,34 @@ export default function StudentDashboard() {
         return
       }
 
+      const { data: course } = student.course_slug
+        ? await supabase
+            .from("courses")
+            .select("name")
+            .eq("slug", student.course_slug)
+            .maybeSingle()
+        : { data: null }
+
+      const { data: branch } = student.branch_id
+        ? await supabase
+            .from("branches")
+            .select("name")
+            .eq("id", student.branch_id)
+            .maybeSingle()
+        : { data: null }
+
       const { data: fees } = await supabase
         .from("fees")
-        .select("amount_paid")
+        .select("paid_amount")
         .eq("student_id", student.id)
 
-      const totalPaid = fees?.reduce((sum: number, f: FeeRow) => sum + f.amount_paid, 0) ?? 0
+      const totalPaid = fees?.reduce((sum: number, f: FeeRow) => sum + f.paid_amount, 0) ?? 0
 
       const { count: attendanceCount } = await supabase
         .from("attendance")
         .select("*", { count: "exact", head: true })
         .eq("student_id", student.id)
-        .eq("status", "present")
+        .eq("status", "Present")
 
       const { count: totalDays } = await supabase
         .from("attendance")
@@ -96,25 +113,28 @@ export default function StudentDashboard() {
 
       const { data: announcements } = await supabase
         .from("announcements")
-        .select("title, date, type")
-        .order("date", { ascending: false })
+        .select("title, published_date, priority")
+        .order("published_date", { ascending: false })
         .limit(5)
 
       const attendancePct =
         totalDays && totalDays > 0
-          ? Math.round((attendanceCount ?? 0) / totalDays) * 100
+          ? Math.round(((attendanceCount ?? 0) / totalDays) * 100)
           : 0
 
+      const courseName = course?.name ?? student.course_slug ?? "Course"
+      const branchName = branch?.name ?? student.branch_id ?? ""
+
       setStudentInfo({
-        name: student.name ?? "Student",
+        name: student.full_name ?? "Student",
         id: student.id,
-        course: student.course ?? "",
-        branch: student.branch ?? "",
+        course: courseName,
+        branch: branchName,
       })
 
       setStats([
         { label: "Attendance", value: `${attendancePct}%`, icon: CalendarCheck, color: "text-emerald-600", bg: "bg-emerald-500/10", href: "/student/attendance" },
-        { label: "Fee Paid", value: `₹${totalPaid.toLocaleString()}`, icon: Wallet, color: "text-violet-600", bg: "bg-violet-500/10", href: "/student/fee" },
+        { label: "Fee Paid", value: `₹${totalPaid.toLocaleString("en-IN")}`, icon: Wallet, color: "text-violet-600", bg: "bg-violet-500/10", href: "/student/fee" },
         { label: "Certificates", value: String(certCount ?? 0), icon: Award, color: "text-amber-600", bg: "bg-amber-500/10", href: "/student/profile/certificates" },
         { label: "Hours", value: String(totalDays ?? 0), icon: Clock, color: "text-blue-600", bg: "bg-blue-500/10", href: "/student/profile/payments" },
       ])
@@ -122,17 +142,16 @@ export default function StudentDashboard() {
       setRecentNotices(
         (announcements ?? []).map((a: AnnouncementRow) => ({
           title: a.title,
-          date: a.date,
-          type: a.type,
+          published_date: a.published_date,
+          priority: a.priority,
         }))
       )
 
-      const courseName = student.course ?? "Course"
       setCourseProgress([
         { name: `${courseName} Basics`, pct: 100, label: "Completed" },
-        { name: `${courseName} Framework`, pct: 72, label: "72%" },
-        { name: `${courseName} Frontend`, pct: 45, label: "45%" },
-        { name: "Database & SQL", pct: 28, label: "28%" },
+        { name: `${courseName} Core`, pct: 72, label: "72%" },
+        { name: `${courseName} Advanced`, pct: 45, label: "45%" },
+        { name: "Projects & Practice", pct: 28, label: "28%" },
       ])
 
       setLoading(false)
@@ -245,9 +264,17 @@ export default function StudentDashboard() {
               <div key={i} className="flex items-center justify-between rounded-lg border border-border p-2.5 sm:p-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-xs sm:text-sm font-medium truncate">{notice.title}</p>
-                  <p className="text-[11px] text-muted-foreground">{notice.date}</p>
+                  <p className="text-[11px] text-muted-foreground">{notice.published_date}</p>
                 </div>
-                <Badge variant="secondary" className="text-[10px] ml-2 shrink-0">{notice.type}</Badge>
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "text-[10px] ml-2 shrink-0",
+                    notice.priority === "high" && "bg-red-500/10 text-red-600 dark:text-red-400"
+                  )}
+                >
+                  {notice.priority}
+                </Badge>
               </div>
             ))}
           </div>

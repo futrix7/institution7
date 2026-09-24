@@ -12,8 +12,6 @@ import {
   CreditCard,
   Wallet,
   BarChart3,
-  UserCircle,
-  Settings,
   Menu,
   X,
   Sun,
@@ -40,8 +38,6 @@ const sidebarLinks = [
   { label: "Videos", href: "/admin/videos", icon: Video },
   { label: "Announcements", href: "/admin/announcements", icon: Megaphone },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
-  { label: "Profile", href: "/admin/profile", icon: UserCircle },
-  { label: "Settings", href: "/admin/profile/settings", icon: Settings },
 ]
 
 function ThemeToggle() {

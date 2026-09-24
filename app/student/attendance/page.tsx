@@ -30,6 +30,7 @@ interface MonthlyRow {
   month: string
   present: number
   absent: number
+  late: number
   leave: number
   total: number
   pct: number
@@ -38,7 +39,7 @@ interface MonthlyRow {
 interface RecentLogRow {
   date: string
   day: string
-  status: "Present" | "Absent" | "Leave"
+  status: "Present" | "Absent" | "Late" | "Leave"
   in: string
   out: string
   hours: string
@@ -47,15 +48,32 @@ interface RecentLogRow {
 const statusConfig: Record<string, { icon: React.ElementType; color: string; bg: string }> = {
   Present: { icon: Check, color: "text-emerald-600", bg: "bg-emerald-500/15" },
   Absent: { icon: X, color: "text-red-600", bg: "bg-red-500/15" },
-  Leave: { icon: Minus, color: "text-amber-600", bg: "bg-amber-500/15" },
+  Late: { icon: Clock, color: "text-amber-600", bg: "bg-amber-500/15" },
+  Leave: { icon: Minus, color: "text-blue-600", bg: "bg-blue-500/15" },
 }
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
+function formatDateKey(d: Date): string {
+  const y = d.getFullYear()
+  const m = (d.getMonth() + 1).toString().padStart(2, "0")
+  const day = d.getDate().toString().padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+
 function formatTime(iso: string | null): string {
   if (!iso) return "—"
+  const match = String(iso).match(/(\d{1,2}):(\d{2})/)
+  if (match) {
+    const h = parseInt(match[1], 10)
+    const m = match[2]
+    const ampm = h >= 12 ? "PM" : "AM"
+    const h12 = h % 12 || 12
+    return `${h12}:${m} ${ampm}`
+  }
   const d = new Date(iso)
+  if (isNaN(d.getTime())) return "—"
   const h = d.getHours()
   const m = d.getMinutes().toString().padStart(2, "0")
   const ampm = h >= 12 ? "PM" : "AM"
@@ -124,7 +142,7 @@ export default function StudentAttendance() {
 
       const today = new Date()
       today.setHours(0, 0, 0, 0)
-      const todayStr = today.toISOString().slice(0, 10)
+      const todayStr = formatDateKey(today)
       const todayRecord = records.find((r) => r.date === todayStr)
       if (todayRecord) {
         setTodayStatus({
@@ -145,7 +163,7 @@ export default function StudentAttendance() {
       for (let i = 0; i < 7; i++) {
         const d = new Date(startOfWeek)
         d.setDate(d.getDate() + i)
-        const dateStr = d.toISOString().slice(0, 10)
+        const dateStr = formatDateKey(d)
         const rec = records.find((r) => r.date === dateStr)
         const isSunday = d.getDay() === 0
         weekDays.push({
@@ -161,17 +179,18 @@ export default function StudentAttendance() {
       const weekHighlights = weekDays.map((d) => d.status === "Present" || d.status === "Leave")
       setWeekHighlight(weekHighlights)
 
-      const monthMap = new Map<string, { present: number; absent: number; leave: number; total: number }>()
+      const monthMap = new Map<string, { present: number; absent: number; late: number; leave: number; total: number }>()
       for (const rec of records) {
         const d = new Date(rec.date)
         const key = `${monthNames[d.getMonth()]} ${d.getFullYear()}`
         if (!monthMap.has(key)) {
-          monthMap.set(key, { present: 0, absent: 0, leave: 0, total: 0 })
+          monthMap.set(key, { present: 0, absent: 0, late: 0, leave: 0, total: 0 })
         }
         const entry = monthMap.get(key)!
         entry.total++
         if (rec.status === "Present") entry.present++
         else if (rec.status === "Absent") entry.absent++
+        else if (rec.status === "Late") entry.late++
         else if (rec.status === "Leave") entry.leave++
       }
 
@@ -179,16 +198,17 @@ export default function StudentAttendance() {
         month,
         present: data.present,
         absent: data.absent,
+        late: data.late,
         leave: data.leave,
         total: data.total,
-        pct: data.total > 0 ? Math.round((data.present / data.total) * 100) : 0,
+        pct: data.total > 0 ? Math.round(((data.present + data.late) / data.total) * 100) : 0,
       }))
       setMonthlyData(monthlyArr)
 
       const logRows: RecentLogRow[] = records.slice(0, 10).map((rec) => ({
         date: formatDateFull(rec.date),
         day: getDayOfWeek(rec.date),
-        status: rec.status as "Present" | "Absent" | "Leave",
+        status: rec.status as "Present" | "Absent" | "Late" | "Leave",
         in: rec.time_in ? formatTime(rec.time_in) : "—",
         out: rec.time_out ? formatTime(rec.time_out) : "—",
         hours: formatHours(rec.hours),
@@ -200,7 +220,7 @@ export default function StudentAttendance() {
       for (let i = 0; i < 365; i++) {
         const d = new Date(todayMidnight)
         d.setDate(d.getDate() - i)
-        const dateStr = d.toISOString().slice(0, 10)
+        const dateStr = formatDateKey(d)
         const rec = records.find((r) => r.date === dateStr)
         if (rec && rec.status === "Present") {
           currentStreak++
@@ -218,9 +238,10 @@ export default function StudentAttendance() {
 
   const totalPresent = monthlyData.reduce((s, m) => s + m.present, 0)
   const totalAbsent = monthlyData.reduce((s, m) => s + m.absent, 0)
+  const totalLate = monthlyData.reduce((s, m) => s + m.late, 0)
   const totalLeave = monthlyData.reduce((s, m) => s + m.leave, 0)
-  const totalDays = totalPresent + totalAbsent + totalLeave
-  const overallPct = totalDays > 0 ? Math.round((totalPresent / totalDays) * 100) : 0
+  const totalDays = totalPresent + totalAbsent + totalLate + totalLeave
+  const overallPct = totalDays > 0 ? Math.round(((totalPresent + totalLate) / totalDays) * 100) : 0
 
   if (loading) {
     return (
@@ -415,8 +436,9 @@ export default function StudentAttendance() {
                 <Progress value={m.pct} className="h-2 mb-2.5" />
                 <div className="flex items-center gap-4 text-[11px] sm:text-xs text-muted-foreground">
                   <span className="flex items-center gap-1"><Check className="size-3 text-emerald-600" />{m.present} present</span>
+                  <span className="flex items-center gap-1"><Clock className="size-3 text-amber-600" />{m.late} late</span>
                   <span className="flex items-center gap-1"><X className="size-3 text-red-600" />{m.absent} absent</span>
-                  <span className="flex items-center gap-1"><Minus className="size-3 text-amber-600" />{m.leave} leave</span>
+                  <span className="flex items-center gap-1"><Minus className="size-3 text-blue-600" />{m.leave} leave</span>
                 </div>
               </CardContent>
             </Card>

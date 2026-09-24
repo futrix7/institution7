@@ -96,17 +96,17 @@ export default function AdminCoursesPage() {
       .not("course_slug", "is", null);
 
     const countByCourse: Record<string, number> = {};
-    (studentCounts || []).forEach((row: any) => {
+    (studentCounts || []).forEach((row) => {
       const slug = row.course_slug;
       countByCourse[slug] = (countByCourse[slug] || 0) + 1;
     });
 
-    const mapped: CourseType[] = (coursesData || []).map((c: any) => ({
+    const mapped: CourseType[] = (coursesData || []).map((c) => ({
       id: c.id,
       name: c.name,
       short_name: c.short_name ?? "",
       duration: c.duration,
-      fee: c.fees,
+      fee: c.fee_numeric ?? 0,
       students: countByCourse[c.slug] ?? 0,
       category: c.type,
       popular: c.popular ?? false,
@@ -124,6 +124,7 @@ export default function AdminCoursesPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchCourses();
   }, []);
 
@@ -212,7 +213,7 @@ export default function AdminCoursesPage() {
           { label: "Total Courses", value: courses.length },
           { label: "Enrollments", value: courses.reduce((sum, c) => sum + c.students, 0) },
           { label: "Popular", value: courses.filter((c) => c.popular).length },
-          { label: "Highest Fee", value: `₹${Math.max(...courses.map((c) => c.fee)).toLocaleString("en-IN")}` },
+          { label: "Highest Fee", value: courses.length > 0 ? `₹${Math.max(...courses.map((c) => c.fee)).toLocaleString("en-IN")}` : "₹0" },
         ].map((stat) => (
           <Card key={stat.label}>
             <CardContent className="flex items-center justify-between">

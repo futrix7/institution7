@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   CalendarCheck,
   Search,
@@ -9,10 +9,10 @@ import {
   Clock,
   Download,
   Filter,
+  Save,
   Users,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,90 +23,187 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
+import { useToast } from "@/components/ui/sonner";
 import { supabase } from "@/lib/supabase";
+import { ExportDialog } from "@/components/admin/export-dialog";
+
+type AttendanceStatus = "Present" | "Absent" | "Late" | "Leave" | "Not Marked";
 
 interface AttendanceRecord {
   studentId: string;
   name: string;
   course: string;
+  branch: string;
+  courseSlug: string | null;
+  branchId: string | null;
   timeIn: string;
   timeOut: string;
-  status: "Present" | "Absent" | "Late" | "Leave";
+  status: AttendanceStatus;
   hours: number;
 }
 
-const statusConfig: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; className: string }> = {
-  Present: { variant: "default", className: "bg-green-600 text-white hover:bg-green-600" },
-  Absent: { variant: "destructive", className: "" },
-  Late: { variant: "secondary", className: "bg-yellow-500 text-white hover:bg-yellow-500" },
-  Leave: { variant: "outline", className: "bg-blue-100 text-blue-700" },
-};
-
 export default function AttendancePage() {
+  const { toast } = useToast();
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [branch, setBranch] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]);
-  const [summaryStats, setSummaryStats] = useState([
-    { label: "Total Students", value: 0, icon: Users, color: "text-blue-500" },
-    { label: "Present", value: 0, icon: CheckCircle2, color: "text-green-500" },
-    { label: "Absent", value: 0, icon: XCircle, color: "text-red-500" },
-    { label: "Late", value: 0, icon: Clock, color: "text-yellow-500" },
-  ]);
-
-  useEffect(() => {
-    fetchAttendance();
-  }, [date]);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const savedStatuses = useRef(new Map<string, AttendanceStatus>());
 
   async function fetchAttendance() {
     setLoading(true);
 
-    const { data: attendanceRows, error } = await supabase
-      .from("attendance")
-      .select("*, students!inner(full_name), courses!inner(name), branches(name)")
-      .eq("date", date)
-      .order("created_at", { ascending: true });
+    const [attendanceRes, studentsRes] = await Promise.all([
+      supabase
+        .from("attendance")
+        .select("*, students(full_name)")
+        .eq("date", date),
+      supabase
+        .from("students")
+        .select("id, full_name, course_slug, branch_id, courses(name), branches(name)")
+        .eq("status", "Active")
+        .order("full_name"),
+    ]);
 
-    if (error) {
-      console.error("Error fetching attendance:", error);
+    if (attendanceRes.error) {
+      console.error("Error fetching attendance:", attendanceRes.error);
+      setLoading(false);
+      return;
+    }
+    if (studentsRes.error) {
+      console.error("Error fetching students:", studentsRes.error);
       setLoading(false);
       return;
     }
 
-    const records: AttendanceRecord[] = (attendanceRows ?? []).map((row: any) => ({
-      studentId: row.student_id,
-      name: row.students?.full_name ?? "Unknown",
-      course: row.courses?.name ?? row.course_slug ?? "N/A",
-      timeIn: row.time_in ?? "",
-      timeOut: row.time_out ?? "",
-      status: row.status,
-      hours: row.hours ?? 0,
-    }));
+    const attendanceMap = new Map<string, { timeIn: string; timeOut: string; status: string; hours: number }>();
+    (attendanceRes.data ?? []).forEach((row) => {
+      attendanceMap.set(row.student_id, {
+        timeIn: row.time_in ?? "",
+        timeOut: row.time_out ?? "",
+        status: row.status,
+        hours: row.hours ?? 0,
+      });
+    });
+
+    const seen = new Set<string>();
+    const records: AttendanceRecord[] = [];
+
+    (studentsRes.data ?? []).forEach((s) => {
+      const course = Array.isArray(s.courses) ? s.courses[0] : s.courses;
+      const branch = Array.isArray(s.branches) ? s.branches[0] : s.branches;
+      const att = attendanceMap.get(s.id);
+      seen.add(s.id);
+      records.push({
+        studentId: s.id,
+        name: s.full_name,
+        course: course?.name ?? s.course_slug ?? "N/A",
+        branch: branch?.name ?? "",
+        courseSlug: s.course_slug,
+        branchId: s.branch_id,
+        timeIn: att?.timeIn ?? "",
+        timeOut: att?.timeOut ?? "",
+        status: (att?.status as AttendanceStatus) ?? "Not Marked",
+        hours: att?.hours ?? 0,
+      });
+    });
+
+    (attendanceRes.data ?? []).forEach((row) => {
+      if (seen.has(row.student_id)) return;
+      const att = attendanceMap.get(row.student_id);
+      records.push({
+        studentId: row.student_id,
+        name: row.students?.full_name ?? "Unknown",
+        course: row.course_slug ?? "N/A",
+        branch: "",
+        courseSlug: row.course_slug,
+        branchId: row.branch_id,
+        timeIn: att?.timeIn ?? "",
+        timeOut: att?.timeOut ?? "",
+        status: (att?.status as AttendanceStatus) ?? "Not Marked",
+        hours: att?.hours ?? 0,
+      });
+    });
 
     setAttendanceData(records);
-
-    const totalStudents = records.length;
-    const presentCount = records.filter((r) => r.status === "Present").length;
-    const absentCount = records.filter((r) => r.status === "Absent").length;
-    const lateCount = records.filter((r) => r.status === "Late").length;
-
-    setSummaryStats([
-      { label: "Total Students", value: totalStudents, icon: Users, color: "text-blue-500" },
-      { label: "Present", value: presentCount, icon: CheckCircle2, color: "text-green-500" },
-      { label: "Absent", value: absentCount, icon: XCircle, color: "text-red-500" },
-      { label: "Late", value: lateCount, icon: Clock, color: "text-yellow-500" },
-    ]);
+    savedStatuses.current = new Map(records.map((r) => [r.studentId, r.status]));
 
     setLoading(false);
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
+    fetchAttendance();
+  }, [date, reloadKey]);
 
   const filteredData = attendanceData.filter((student) => {
     const matchesSearch =
       student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       student.studentId.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesSearch;
+    const matchesBranch = branch === "all" || student.branch === branch;
+    return matchesSearch && matchesBranch;
   });
+
+  const summaryStats = [
+    { label: "Total Students", value: attendanceData.length, icon: Users, color: "text-blue-500" },
+    { label: "Present", value: attendanceData.filter((r) => r.status === "Present").length, icon: CheckCircle2, color: "text-green-500" },
+    { label: "Absent", value: attendanceData.filter((r) => r.status === "Absent").length, icon: XCircle, color: "text-red-500" },
+    { label: "Late", value: attendanceData.filter((r) => r.status === "Late").length, icon: Clock, color: "text-yellow-500" },
+  ];
+
+  function handleStatusChange(studentId: string, status: "Present" | "Absent") {
+    setAttendanceData((prev) =>
+      prev.map((r) => (r.studentId === studentId ? { ...r, status } : r))
+    );
+  }
+
+  function computeHours(inTime: string, outTime: string): number {
+    const [ih, im] = inTime.split(":").map(Number);
+    const [oh, om] = outTime.split(":").map(Number);
+    let diff = oh * 60 + om - (ih * 60 + im);
+    if (diff < 0) diff += 24 * 60;
+    return Math.round((diff / 60) * 10) / 10;
+  }
+
+  async function handleSave() {
+    const changed = attendanceData.some(
+      (r) => savedStatuses.current.get(r.studentId) !== r.status
+    );
+
+    if (!changed) {
+      toast("No changes to save", { variant: "info" });
+      return;
+    }
+
+    const rows = attendanceData
+      .filter((r) => r.status !== "Not Marked")
+      .map((r) => ({
+        student_id: r.studentId,
+        date,
+        course_slug: r.courseSlug,
+        branch_id: r.branchId,
+        status: r.status,
+        time_in: r.timeIn || null,
+        time_out: r.timeOut || null,
+        hours: r.timeIn && r.timeOut ? computeHours(r.timeIn, r.timeOut) : r.hours,
+      }));
+
+    setSaving(true);
+    const { error } = await supabase.from("attendance").upsert(rows, { onConflict: "student_id,date" });
+    setSaving(false);
+
+    if (error) {
+      toast("Failed to save attendance: " + error.message, { variant: "destructive" });
+      return;
+    }
+
+    toast("Attendance saved successfully", { variant: "success" });
+    setReloadKey((k) => k + 1);
+  }
 
   return (
     <div className="space-y-6 p-6">
@@ -121,13 +218,13 @@ export default function AttendancePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}>
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
-          <Button size="sm">
-            <CheckCircle2 className="mr-2 h-4 w-4" />
-            Mark Attendance
+          <Button size="sm" onClick={handleSave} disabled={saving}>
+            <Save className="mr-2 h-4 w-4" />
+            {saving ? "Saving..." : "Save Attendance"}
           </Button>
         </div>
       </div>
@@ -183,12 +280,9 @@ export default function AttendancePage() {
                   onChange={(e) => setBranch(e.target.value)}
                 >
                   <option value="all">All Branches</option>
-                  <option value="cse">CSE</option>
-                  <option value="ece">ECE</option>
-                  <option value="me">ME</option>
-                  <option value="it">IT</option>
-                  <option value="bca">BCA</option>
-                  <option value="mca">MCA</option>
+                  <option value="Ramanthapur">Ramanthapur</option>
+                  <option value="Amberpet">Amberpet</option>
+                  <option value="Kodad">Kodad</option>
                 </select>
               </div>
             </div>
@@ -207,6 +301,7 @@ export default function AttendancePage() {
                   <TableHead>Student ID</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Course</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>Time In</TableHead>
                   <TableHead>Time Out</TableHead>
                   <TableHead>Status</TableHead>
@@ -221,6 +316,7 @@ export default function AttendancePage() {
                     </TableCell>
                     <TableCell>{student.name}</TableCell>
                     <TableCell>{student.course}</TableCell>
+                    <TableCell>{student.branch || "-"}</TableCell>
                     <TableCell>
                       {student.timeIn || "-"}
                     </TableCell>
@@ -228,12 +324,34 @@ export default function AttendancePage() {
                       {student.timeOut || "-"}
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant={statusConfig[student.status]?.variant ?? "outline"}
-                        className={statusConfig[student.status]?.className ?? ""}
-                      >
-                        {student.status}
-                      </Badge>
+                      <div className="flex gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={student.status === "Present" ? "default" : "outline"}
+                          className={
+                            student.status === "Present"
+                              ? "h-7 w-8 px-0 text-xs bg-green-600 text-white hover:bg-green-600"
+                              : "h-7 w-8 px-0 text-xs"
+                          }
+                          onClick={() => handleStatusChange(student.studentId, "Present")}
+                        >
+                          P
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={student.status === "Absent" ? "default" : "outline"}
+                          className={
+                            student.status === "Absent"
+                              ? "h-7 w-8 px-0 text-xs bg-red-600 text-white hover:bg-red-600"
+                              : "h-7 w-8 px-0 text-xs"
+                          }
+                          onClick={() => handleStatusChange(student.studentId, "Absent")}
+                        >
+                          A
+                        </Button>
+                      </div>
                     </TableCell>
                     <TableCell className="text-right">
                       {student.hours > 0 ? student.hours.toFixed(2) : "-"}
@@ -242,8 +360,8 @@ export default function AttendancePage() {
                 ))}
                 {filteredData.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center">
-                      <p className="text-muted-foreground">No attendance records found for this date.</p>
+                    <TableCell colSpan={8} className="h-24 text-center">
+                      <p className="text-muted-foreground">No students found for this date.</p>
                     </TableCell>
                   </TableRow>
                 )}
@@ -252,6 +370,22 @@ export default function AttendancePage() {
           )}
         </CardContent>
       </Card>
+
+      <ExportDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        rows={attendanceData.map((r) => ({
+          "Student ID": r.studentId,
+          Name: r.name,
+          Course: r.course,
+          Branch: r.branch,
+          "Time In": r.timeIn,
+          "Time Out": r.timeOut,
+          Status: r.status,
+          Hours: r.hours,
+        }))}
+        filename="attendance-report"
+      />
     </div>
   );
 }

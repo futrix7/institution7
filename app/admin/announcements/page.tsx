@@ -83,14 +83,24 @@ export default function AnnouncementsPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchAnnouncements()
   }, [])
 
+  const now = new Date()
   const stats = [
     { label: "Total", value: announcements.length, color: "text-foreground" },
     { label: "Pinned", value: announcements.filter((a) => a.pinned).length, color: "text-violet-600" },
     { label: "High Priority", value: announcements.filter((a) => a.priority === "high").length, color: "text-red-600" },
-    { label: "This Month", value: announcements.filter((a) => a.date.includes("Aug")).length, color: "text-emerald-600" },
+    {
+      label: "This Month",
+      value: announcements.filter((a) => {
+        if (!a.date) return false
+        const d = new Date(a.date)
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+      }).length,
+      color: "text-emerald-600",
+    },
   ]
 
   const filtered = announcements.filter(

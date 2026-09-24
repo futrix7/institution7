@@ -24,6 +24,7 @@ import {
   Award,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { useToast } from "@/components/ui/sonner"
 
 interface Profile {
   name: string
@@ -66,8 +67,10 @@ function formatDate(dateStr: string | null) {
 }
 
 export default function StudentProfile() {
+  const { toast } = useToast()
   const [profile, setProfile] = useState<Profile>(fallbackProfile)
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [editName, setEditName] = useState("")
   const [editEmail, setEditEmail] = useState("")
@@ -89,7 +92,7 @@ export default function StudentProfile() {
         .single()
 
       if (student) {
-        const s = student as any
+        const s = student
         const p: Profile = {
           name: s.full_name,
           id: s.id,
@@ -117,9 +120,36 @@ export default function StudentProfile() {
     fetchProfile()
   }, [])
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!editName.trim() || !editPhone.trim()) {
+      toast("Name and phone are required", { variant: "destructive" })
+      return
+    }
+    setSaving(true)
+
+    const { error } = await supabase
+      .from("students")
+      .update({
+        full_name: editName,
+        phone: editPhone,
+        address: editAddress || null,
+      })
+      .eq("id", profile.id)
+
+    if (error) {
+      toast("Failed to save profile: " + error.message, { variant: "destructive" })
+      setSaving(false)
+      return
+    }
+
+    await supabase.auth.updateUser({
+      data: { full_name: editName, phone: editPhone },
+    })
+
     setProfile({ ...profile, name: editName, email: editEmail, phone: editPhone, address: editAddress })
     setEditOpen(false)
+    setSaving(false)
+    toast("Profile updated successfully", { variant: "success" })
   }
 
   const handleCancel = () => {
@@ -185,8 +215,17 @@ export default function StudentProfile() {
                     <Input id="edit-address" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} />
                   </div>
                   <div className="flex gap-2 justify-end">
-                    <Button variant="outline" onClick={handleCancel}>Cancel</Button>
-                    <Button onClick={handleSave}>Save Changes</Button>
+                    <Button variant="outline" onClick={handleCancel} disabled={saving}>Cancel</Button>
+                    <Button onClick={handleSave} disabled={saving}>
+                      {saving ? (
+                        <>
+                          <Loader2 className="size-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        "Save Changes"
+                      )}
+                    </Button>
                   </div>
                 </div>
               </DialogContent>

@@ -48,6 +48,7 @@ export function EditCourseSheet({ open, onOpenChange, course, onSuccess }: EditC
 
   useEffect(() => {
     if (course) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync form state when opening the sheet
       setCourseName(course.name)
       setShortName(course.short_name)
       setDuration(course.duration)
@@ -85,7 +86,7 @@ export function EditCourseSheet({ open, onOpenChange, course, onSuccess }: EditC
         full_description: description.trim() || courseName.trim(),
         topics: topics ? topics.split(",").map((t) => t.trim()).filter(Boolean) : [],
         fees: fee ? `₹${Number(fee).toLocaleString("en-IN")}` : "₹0",
-        fee_numeric: fee ? parseInt(fee) : 0,
+        fee_numeric: fee ? (parseInt(fee) || 0) : 0,
         eligibility: eligibility || "Any",
       })
       .eq("id", course.id)

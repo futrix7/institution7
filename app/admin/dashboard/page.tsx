@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,7 @@ const STATUS_MAP: Record<string, string> = {
 };
 
 export default function AdminDashboardPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [totalStudents, setTotalStudents] = useState(0);
   const [studentGrowth, setStudentGrowth] = useState("");
@@ -101,10 +103,6 @@ export default function AdminDashboardPage() {
   const [weeklyAttendance, setWeeklyAttendance] = useState<{ day: string; rate: number }[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<{ event: string; date: string; type: string }[]>([]);
   const [pendingTasks, setPendingTasks] = useState<{ task: string; priority: string }[]>([]);
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
 
   async function fetchDashboardData() {
     try {
@@ -278,6 +276,11 @@ export default function AdminDashboardPage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
+    fetchDashboardData();
+  }, []);
 
   const statCards = [
     {
@@ -477,7 +480,7 @@ export default function AdminDashboardPage() {
                 </CardTitle>
                 <CardDescription className="text-xs">Latest student registrations</CardDescription>
               </div>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={() => router.push("/admin/students")}>
                 View All
               </Button>
             </div>

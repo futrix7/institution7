@@ -33,6 +33,7 @@ export default function StudentCertificates() {
   const { toast } = useToast()
   const [certificates, setCertificates] = useState<Certificate[]>([])
   const [loading, setLoading] = useState(true)
+  const [studentName, setStudentName] = useState("")
   const [tab, setTab] = useState("all")
   const [reqOpen, setReqOpen] = useState(false)
   const [reqType, setReqType] = useState("Completion")
@@ -49,7 +50,7 @@ export default function StudentCertificates() {
 
       const { data: student } = await supabase
         .from("students")
-        .select("id")
+        .select("id, full_name")
         .eq("user_id", user.id)
         .single()
 
@@ -58,6 +59,8 @@ export default function StudentCertificates() {
         return
       }
 
+      setStudentName(student.full_name)
+
       const { data } = await supabase
         .from("certificates")
         .select("*")
@@ -65,15 +68,21 @@ export default function StudentCertificates() {
         .order("created_at", { ascending: false })
 
       if (data) {
+        const slugs = [...new Set(data.map((c) => c.course_slug).filter(Boolean))] as string[]
+        const { data: courses } = slugs.length
+          ? await supabase.from("courses").select("slug, name").in("slug", slugs)
+          : { data: null }
+        const courseMap = new Map((courses ?? []).map((c) => [c.slug, c.name]))
+
         setCertificates(
           data.map((c) => ({
             id: c.id,
             name: c.name,
-            course: c.course_slug || "Course",
+            course: (c.course_slug && courseMap.get(c.course_slug)) || c.course_slug || "Course",
             issuedDate: c.issued_date || "—",
             credentialId: c.credential_id || "—",
             status: c.status as Certificate["status"],
-            issueBy: c.issued_by || "—",
+            issueBy: c.issued_by || "TNGC Computers",
             type: c.type,
           }))
         )
@@ -86,6 +95,7 @@ export default function StudentCertificates() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchCertificates()
   }, [])
 
@@ -96,8 +106,58 @@ export default function StudentCertificates() {
 
   const issued = certificates.filter((c) => c.status === "Issued").length
 
-  const handleDownload = (name: string) => {
-    toast(`Downloading ${name}...`, { variant: "success" })
+  const handleDownload = (cert: Certificate) => {
+    const studentDisplay = studentName || "Student"
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>${cert.name}</title>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; margin: 0; padding: 40px; color: #1a202c; }
+  .cert { max-width: 800px; margin: 0 auto; border: 4px double #16a34a; padding: 48px; text-align: center; }
+  .brand { font-size: 28px; font-weight: 700; color: #16a34a; letter-spacing: 2px; }
+  .sub { font-size: 12px; letter-spacing: 3px; color: #718096; text-transform: uppercase; margin-top: 4px; }
+  .line { border-top: 2px solid #16a34a; margin: 20px auto; width: 120px; }
+  .intro { font-size: 13px; color: #718096; text-transform: uppercase; letter-spacing: 2px; }
+  .name { font-size: 34px; font-weight: 700; margin: 8px 0 16px; border-bottom: 2px solid #e2e8f0; display: inline-block; padding: 0 24px 8px; }
+  .body { font-size: 15px; color: #4a5568; }
+  .course { font-size: 20px; font-weight: 700; color: #16a34a; margin: 6px 0; }
+  .meta { display: flex; justify-content: space-between; margin-top: 40px; font-size: 12px; color: #718096; text-align: center; gap: 20px; }
+  .meta div { flex: 1; }
+  .meta strong { display: block; color: #1a202c; font-size: 14px; margin-top: 6px; }
+  @media print { body { padding: 20px; } }
+</style>
+</head>
+<body>
+  <div class="cert">
+    <div class="brand">TNGC Computers</div>
+    <div class="sub">Certificate of ${cert.type}</div>
+    <hr class="line" />
+    <p class="intro">This is to certify that</p>
+    <p class="name">${studentDisplay}</p>
+    <p class="body">has successfully completed the course</p>
+    <p class="course">${cert.course}</p>
+    <p class="body">with satisfactory performance and has been awarded this certificate.</p>
+    <div class="meta">
+      <div>Credential ID<strong>${cert.credentialId}</strong></div>
+      <div>Date Issued<strong>${cert.issuedDate}</strong></div>
+      <div>Issued By<strong>${cert.issueBy}</strong></div>
+    </div>
+  </div>
+  <script>window.onload = function () { window.print(); }</script>
+</body>
+</html>`
+
+    const win = window.open("", "_blank", "width=900,height=700")
+    if (!win) {
+      toast("Please allow pop-ups to download certificates", { variant: "destructive" })
+      return
+    }
+    win.document.write(html)
+    win.document.close()
+    win.focus()
   }
 
   const handleRequest = async () => {
@@ -273,7 +333,7 @@ export default function StudentCertificates() {
                       </Button>
                     )}
                     {cert.status === "Issued" && (
-                      <Button variant="outline" size="sm" className="gap-1" onClick={() => handleDownload(cert.name)}>
+                      <Button variant="outline" size="sm" className="gap-1" onClick={() => handleDownload(cert)}>
                         <Download className="size-3" />
                         <span className="hidden sm:inline">Download</span>
                         <span className="sm:hidden">PDF</span>
@@ -302,7 +362,7 @@ export default function StudentCertificates() {
                 </div>
                 <div className="text-center space-y-2 py-2">
                   <p className="text-xs uppercase tracking-wider text-muted-foreground">This is to certify that</p>
-                  <p className="text-lg font-bold">Student</p>
+                  <p className="text-lg font-bold">{studentName || "Student"}</p>
                   <p className="text-xs text-muted-foreground">has successfully completed</p>
                   <p className="text-sm font-semibold">{viewCert.course}</p>
                 </div>
@@ -317,7 +377,7 @@ export default function StudentCertificates() {
                   </div>
                 </div>
               </div>
-              <Button className="w-full gap-1 mt-2" onClick={() => handleDownload(viewCert.name)}>
+              <Button className="w-full gap-1 mt-2" onClick={() => handleDownload(viewCert)}>
                 <Download className="size-3" />
                 Download Certificate
               </Button>
