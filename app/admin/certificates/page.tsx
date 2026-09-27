@@ -29,15 +29,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select"
-import {
-  Search,
-  Award,
-  CheckCircle2,
-  Clock,
-  ArrowRight,
-  Send,
-  Loader2,
-} from "lucide-react"
+import { Search, Award, CheckCircle2, Clock, Send, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/components/ui/sonner"

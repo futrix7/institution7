@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowLeft, Award, Download, CheckCircle2, Clock, Eye, Send, Loader2 } from "lucide-react"
 import { useToast } from "@/components/ui/sonner"
 import { supabase } from "@/lib/supabase"
+import { QueryError } from "@/components/student/data-state"
 
 interface Certificate {
   id: string
@@ -39,35 +40,53 @@ export default function StudentCertificates() {
   const [reqType, setReqType] = useState("Completion")
   const [reqNotes, setReqNotes] = useState("")
   const [viewCert, setViewCert] = useState<Certificate | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
 
   async function fetchCertificates() {
     try {
+      setLoadError(null)
+
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
+        setLoadError("No signed-in user was found")
         setLoading(false)
         return
       }
 
-      const { data: student } = await supabase
+      const { data: student, error: studentError } = await supabase
         .from("students")
         .select("id, full_name")
         .eq("user_id", user.id)
         .single()
 
-      if (!student) {
+      if (studentError || !student) {
+        console.error("[certificates] student lookup failed:", studentError?.message)
+        setLoadError(studentError?.message ?? "No student record is linked to this account")
         setLoading(false)
         return
       }
 
       setStudentName(student.full_name)
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("certificates")
         .select("*")
         .eq("student_id", student.id)
         .order("created_at", { ascending: false })
 
-      if (data) {
+      // The `if (data)` guard this replaces read as "you have no certificates"
+      // for a request that never succeeded. The empty state below is a
+      // different statement and now only appears when the read genuinely
+      // returned nothing.
+      if (error) {
+        console.error("[certificates] lookup failed:", error.message)
+        setLoadError(error.message)
+        setLoading(false)
+        return
+      }
+
+      {
         const slugs = [...new Set(data.map((c) => c.course_slug).filter(Boolean))] as string[]
         const { data: courses } = slugs.length
           ? await supabase.from("courses").select("slug, name").in("slug", slugs)
@@ -88,7 +107,8 @@ export default function StudentCertificates() {
         )
       }
     } catch (err) {
-      console.error("Failed to fetch certificates:", err)
+      console.error("[certificates] fetch crashed:", err)
+      setLoadError(err instanceof Error ? err.message : "Unexpected error")
     } finally {
       setLoading(false)
     }
@@ -97,7 +117,7 @@ export default function StudentCertificates() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchCertificates()
-  }, [])
+  }, [attempt])
 
   const filtered = tab === "all" ? certificates : certificates.filter((c) => {
     if (tab === "issued") return c.status === "Issued"
@@ -205,6 +225,22 @@ export default function StudentCertificates() {
     return (
       <div className="flex items-center justify-center p-8">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-4 p-4 sm:p-6 lg:p-8">
+        <Link href="/student/profile" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="size-4" />
+          Back to Profile
+        </Link>
+        <QueryError
+          what="your certificates"
+          detail={loadError}
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
       </div>
     )
   }

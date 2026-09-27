@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -31,7 +31,7 @@ import {
   Banknote,
   Calendar,
 } from "lucide-react"
-import { cn } from "@/lib/utils"
+
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/components/ui/sonner"
 import { useStudent } from "../layout"
@@ -65,11 +65,11 @@ export default function StudentInstallmentsPage() {
 
   const [collectOpen, setCollectOpen] = useState(false)
   const [selectedInstallment, setSelectedInstallment] = useState<Installment | null>(null)
-  const [collectAmount, setCollectAmount] = useState("")
+  const [collectReference, setCollectReference] = useState("")
   const [collectMethod, setCollectMethod] = useState("Cash")
   const [collecting, setCollecting] = useState(false)
 
-  async function fetchData() {
+  const fetchData = useCallback(async () => {
     if (!student) return
 
     const { data: feesRows } = await supabase
@@ -116,16 +116,16 @@ export default function StudentInstallmentsPage() {
     }
 
     setLoading(false)
-  }
+  }, [student])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchData()
-  }, [student])
+  }, [fetchData])
 
   function openCollect(inst: Installment) {
     setSelectedInstallment(inst)
-    setCollectAmount(String(inst.amount))
+    setCollectReference("")
     setCollectMethod("Cash")
     setCollectOpen(true)
   }
@@ -134,37 +134,64 @@ export default function StudentInstallmentsPage() {
     if (!selectedInstallment || !student) return
     setCollecting(true)
 
-    const amount = parseInt(collectAmount) || 0
+    // One call, one transaction. This used to be three separate browser writes
+    // whose errors were never checked: a payment row, an installment status, and
+    // an incremented fees.paid_amount that never decremented pending_amount. Any
+    // of them failing produced exactly the reported "marked paid but the payment
+    // could not be recorded", and the toast claimed success either way.
+    //
+    // The amount is the installment's own, not the field below. A counter
+    // collection settles an installment; if less than the full amount was taken,
+    // the shortfall is a part payment and belongs in a different flow, not
+    // silently recorded as if the installment were discharged.
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
 
-    await supabase.from("payments").insert({
-      student_id: student.id,
-      amount,
-      method: collectMethod,
-      status: "Paid",
-      description: selectedInstallment.label,
-      payment_date: new Date().toISOString().split("T")[0],
-    })
+      if (!token) {
+        toast("Your session has expired. Please sign in again.", { variant: "destructive" })
+        return
+      }
 
-    await supabase
-      .from("fee_installments")
-      .update({ status: "Paid", paid_date: new Date().toISOString().split("T")[0] })
-      .eq("id", selectedInstallment.id)
+      const res = await fetch("/api/installments/mark-paid", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          installmentId: selectedInstallment.id,
+          // Lowercased: the method buttons hold the display form ("UPI", "Cash"),
+          // and the route validates against a lowercase pattern.
+          method: collectMethod.toLowerCase(),
+          reference: collectReference.trim(),
+        }),
+      })
 
-    const { data: feeRow } = await supabase
-      .from("fees").select("id, paid_amount").eq("id", selectedInstallment.feeId).single()
+      const json = (await res.json()) as { error?: string }
 
-    if (feeRow) {
-      await supabase
-        .from("fees")
-        .update({ paid_amount: (feeRow.paid_amount ?? 0) + amount })
-        .eq("id", selectedInstallment.feeId)
+      if (!res.ok) {
+        toast(json.error ?? "We couldn't record that payment. Nothing was changed.", {
+          variant: "destructive",
+          duration: 10000,
+        })
+        return
+      }
+
+      toast(`${selectedInstallment.label} marked paid, and the receipt was recorded.`, {
+        variant: "success",
+      })
+      setCollectOpen(false)
+      setCollectReference("")
+      setLoading(true)
+      fetchData()
+    } catch {
+      toast("We couldn't record that payment. Nothing was changed — please try again.", {
+        variant: "destructive",
+      })
+    } finally {
+      setCollecting(false)
     }
-
-    toast("Payment collected successfully!", { variant: "success" })
-    setCollecting(false)
-    setCollectOpen(false)
-    setLoading(true)
-    fetchData()
   }
 
   if (loading) {
@@ -319,15 +346,15 @@ export default function StudentInstallmentsPage() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="collectAmount" className="text-sm font-semibold">Amount (₹)</Label>
-              <Input
-                id="collectAmount"
-                type="number"
-                value={collectAmount}
-                onChange={(e) => setCollectAmount(e.target.value)}
-                className="h-11 text-lg font-bold"
-              />
+            {/* Read-only. The amount is the installment's own: a counter collection
+                discharges an installment or it does not. The field used to be
+                editable, which let an admin record a part payment as a full one and
+                leave the balance silently wrong. */}
+            <div className="rounded-lg bg-muted/50 p-3">
+              <p className="text-xs text-muted-foreground">Amount being collected</p>
+              <p className="text-2xl font-extrabold">
+                ₹{selectedInstallment?.amount.toLocaleString("en-IN")}
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -347,15 +374,30 @@ export default function StudentInstallmentsPage() {
                 ))}
               </div>
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="collectReference" className="text-sm font-semibold">
+                Reference (optional)
+              </Label>
+              <Input
+                id="collectReference"
+                value={collectReference}
+                onChange={(e) => setCollectReference(e.target.value)}
+                placeholder="Receipt or transaction number"
+                className="h-11"
+              />
+            </div>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
             <Button variant="outline" size="lg" onClick={() => setCollectOpen(false)} disabled={collecting} className="px-6">
               Cancel
             </Button>
-            <Button size="lg" onClick={handleCollect} disabled={collecting || !collectAmount} className="gap-2 px-6">
+            <Button size="lg" onClick={handleCollect} disabled={collecting} className="gap-2 px-6">
               {collecting ? <Loader2 className="size-5 animate-spin" /> : <Banknote className="size-5" />}
-              {collecting ? "Collecting..." : `Collect ₹${parseInt(collectAmount || "0").toLocaleString()}`}
+              {collecting
+                ? "Recording..."
+                : `Collect ₹${selectedInstallment?.amount.toLocaleString("en-IN")}`}
             </Button>
           </DialogFooter>
         </DialogContent>

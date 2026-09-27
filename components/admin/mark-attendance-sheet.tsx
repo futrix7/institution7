@@ -78,7 +78,7 @@ export function MarkAttendanceSheet({ open, onOpenChange, date, onSuccess }: Mar
       setStatuses(defaults)
     }
     loadData()
-  }, [open])
+  }, [open, toast])
 
   async function handleSubmit() {
     if (students.length === 0) {

@@ -98,13 +98,13 @@ export function AddCourseSheet({ open, onOpenChange, onSuccess }: AddCourseSheet
           <Input id="courseName" placeholder="Enter course name" value={courseName} onChange={(e) => setCourseName(e.target.value)} />
         </FormField>
         <FormField label="Short Name" htmlFor="shortName">
-          <Input id="shortName" placeholder="e.g. DCA" value={shortName} onChange={(e) => setShortName(e.target.value)} />
+          <Input id="shortName" placeholder="Enter the short name" value={shortName} onChange={(e) => setShortName(e.target.value)} />
         </FormField>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <FormField label="Duration" htmlFor="duration">
-          <Input id="duration" placeholder="e.g. 3 Months" value={duration} onChange={(e) => setDuration(e.target.value)} />
+          <Input id="duration" placeholder="Enter the duration" value={duration} onChange={(e) => setDuration(e.target.value)} />
         </FormField>
         <FormField label="Course Type">
           <Select value={courseType} onValueChange={(v) => setCourseType(v ?? "")}>

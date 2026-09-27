@@ -1,9 +1,10 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Link from "next/link"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   Table,
@@ -13,20 +14,7 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table"
-import {
-  Search,
-  Plus,
-  Megaphone,
-  Calendar,
-  Users,
-  Pin,
-  Trash2,
-  Edit,
-  ArrowRight,
-  AlertCircle,
-  Info,
-  CheckCircle2,
-} from "lucide-react"
+import { Search, Plus, Calendar, Users, Pin, ArrowRight, AlertCircle, Info, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AnnouncementDialog } from "@/components/admin/announcement-dialog"
 import { supabase } from "@/lib/supabase"
@@ -172,9 +160,13 @@ export default function AnnouncementsPage() {
                           <span>By {a.author}</span>
                         </div>
                       </div>
-                      <Button variant="ghost" size="icon-sm">
+                      <Link
+                        href={`/admin/announcements/${a.id}`}
+                        aria-label={`Open ${a.title}`}
+                        className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+                      >
                         <ArrowRight className="h-4 w-4" />
-                      </Button>
+                      </Link>
                     </div>
                   </CardContent>
                 </Card>
@@ -236,9 +228,13 @@ export default function AnnouncementsPage() {
                     <TableCell className="hidden sm:table-cell text-muted-foreground text-sm">{a.date}</TableCell>
                     <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">{a.author}</TableCell>
                     <TableCell>
-                      <Button variant="ghost" size="icon-sm">
+                      <Link
+                        href={`/admin/announcements/${a.id}`}
+                        aria-label={`Open ${a.title}`}
+                        className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+                      >
                         <ArrowRight className="h-4 w-4" />
-                      </Button>
+                      </Link>
                     </TableCell>
                   </TableRow>
                 )

@@ -48,6 +48,7 @@ import {
   AlertTriangle,
   Plus,
   Loader2,
+  RotateCcw,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
@@ -66,6 +67,7 @@ interface Installment {
   paidDate: string | null
   status: "Paid" | "Pending"
   branch: string
+  branchId: string | null
 }
 
 interface StudentOption {
@@ -114,6 +116,9 @@ export default function InstallmentsPage() {
   const [payOpen, setPayOpen] = useState(false)
   const [payingId, setPayingId] = useState<string | null>(null)
   const [paying, setPaying] = useState(false)
+  const [unmarkingId, setUnmarkingId] = useState<string | null>(null)
+  const [confirmUnmark, setConfirmUnmark] = useState<Installment | null>(null)
+  const [unmarkReason, setUnmarkReason] = useState("")
 
   const fetchInstallments = useCallback(async () => {
     setLoading(true)
@@ -155,13 +160,11 @@ export default function InstallmentsPage() {
       }
     }
 
-    const installMap = new Map<string, number>()
-
     const parsed: Installment[] = rows.map((row) => {
       const feeId = row.fee_id
-      const count = (installMap.get(feeId) || 0) + 1
-      installMap.set(feeId, count)
-
+      // installment_no is stored, not counted from row order. It used to be
+      // derived from how many rows had been seen for the fee, which silently
+      // renumbered a schedule whenever the query's ordering changed.
       const student = studentsMap[row.fees?.student_id ?? ""]
       const branchName = student ? (branchesMap[student.branch_id ?? ""] || "N/A") : "N/A"
       const courseName = coursesMap[row.fees?.course_slug] || row.fees?.course_slug || "N/A"
@@ -173,12 +176,13 @@ export default function InstallmentsPage() {
         studentName: student?.full_name ?? "Unknown",
         course: courseName,
         label: row.label,
-        installmentNo: count,
+        installmentNo: row.installment_no ?? 0,
         amount: row.amount,
         dueDate: row.due_date,
         paidDate: row.paid_date,
         status: row.status as "Paid" | "Pending",
         branch: branchName,
+        branchId: student?.branch_id ?? null,
       }
     })
 
@@ -196,10 +200,18 @@ export default function InstallmentsPage() {
       .filter((i) => i.status === "Paid" && i.paidDate?.startsWith(thisMonth))
       .reduce((sum, i) => sum + i.amount, 0)
 
+    // Overdue is Pending installments whose due date has passed. It used to be a
+    // copy of the Pending figure, so the two cards always agreed and neither ever
+    // told an admin which installments were actually late.
+    const today = now.toISOString().split("T")[0]
+    const overdueAmount = parsed
+      .filter((i) => i.status === "Pending" && i.dueDate < today)
+      .reduce((sum, i) => sum + i.amount, 0)
+
     setStats([
       { label: "Total Collected", value: `₹${totalCollected.toLocaleString("en-IN")}`, color: "text-emerald-600 dark:text-emerald-400" },
       { label: "Pending", value: `₹${pendingAmount.toLocaleString("en-IN")}`, color: "text-amber-600 dark:text-amber-400" },
-      { label: "Overdue", value: `₹${pendingAmount.toLocaleString("en-IN")}`, color: "text-red-600 dark:text-red-400" },
+      { label: "Overdue", value: `₹${overdueAmount.toLocaleString("en-IN")}`, color: "text-red-600 dark:text-red-400" },
       { label: "This Month", value: `₹${thisMonthAmount.toLocaleString("en-IN")}`, color: "text-foreground" },
     ])
 
@@ -273,45 +285,52 @@ export default function InstallmentsPage() {
       return
     }
 
-    const { data: existing } = await supabase
-      .from("fee_installments")
-      .select("id")
-      .eq("fee_id", student.feeId)
-      .limit(1)
-
-    if (existing && existing.length > 0) {
-      toast("Installment plan already exists for this student", { variant: "destructive" })
-      setCreating(false)
-      return
-    }
-
     const count = parseInt(installmentCount)
-    const remaining = student.total_fee - student.paid_amount
-    const perMonth = Math.ceil(remaining / count)
 
-    const now = new Date()
-    const rows = Array.from({ length: count }, (_, i) => ({
-      fee_id: student.feeId,
-      label: `Installment ${i + 1} of ${count}`,
-      amount: perMonth,
-      due_date: new Date(now.getFullYear(), now.getMonth() + i + 1, 1).toISOString().split("T")[0],
-      status: "Pending" as const,
-    }))
+    try {
+      // The endpoint verifies the admin session server-side; without the token it
+      // cannot tell an administrator from an anonymous visitor.
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
 
-    const { error } = await supabase.from("fee_installments").insert(rows)
+      if (!token) {
+        toast("Your session has expired. Please sign in again.", { variant: "destructive" })
+        setCreating(false)
+        return
+      }
 
-    setCreating(false)
+      const res = await fetch("/api/installments/plan", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ feeId: selectedStudent, count }),
+      })
 
-    if (error) {
-      toast("Failed to create installments: " + error.message, { variant: "destructive" })
-      return
+      const json = (await res.json()) as { error?: string }
+
+      if (!res.ok) {
+        toast(json.error ?? "We couldn't build that schedule. Nothing was changed.", {
+          variant: "destructive",
+          duration: 10000,
+        })
+        setCreating(false)
+        return
+      }
+
+      toast(`${count}-installment plan created`, { variant: "success" })
+      setSelectedStudent("")
+      setInstallmentCount("3")
+      setAddOpen(false)
+      fetchInstallments()
+    } catch {
+      toast("We couldn't build that schedule. Nothing was changed — please try again.", {
+        variant: "destructive",
+      })
+    } finally {
+      setCreating(false)
     }
-
-    toast(`${count}-month installment plan created`, { variant: "success" })
-    setSelectedStudent("")
-    setInstallmentCount("3")
-    setAddOpen(false)
-    fetchInstallments()
   }
 
   async function handleMarkPaid() {
@@ -325,52 +344,99 @@ export default function InstallmentsPage() {
       return
     }
 
-    const today = new Date().toISOString().split("T")[0]
+    try {
+      // The endpoint verifies the admin session server-side; without the token it
+      // cannot tell an administrator from an anonymous visitor.
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
 
-    const { error: updateErr } = await supabase
-      .from("fee_installments")
-      .update({
-        status: "Paid",
-        paid_date: today,
+      if (!token) {
+        toast("Your session has expired. Please sign in again.", { variant: "destructive" })
+        setPaying(false)
+        return
+      }
+
+      const res = await fetch("/api/installments/mark-paid", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ installmentId: payingId, method: "cash" }),
       })
-      .eq("id", payingId)
 
-    if (updateErr) {
-      toast("Failed to mark as paid: " + updateErr.message, { variant: "destructive" })
+      const json = (await res.json()) as { error?: string; amount?: number }
+
+      if (!res.ok) {
+        // "Nothing was changed" is now literally true: the payment, the
+        // installment and the fee balance are written in one transaction, so
+        // there is no half-finished state left behind to go and reconcile.
+        toast(json.error ?? "We couldn't record that payment. Nothing was changed.", {
+          variant: "destructive",
+          duration: 10000,
+        })
+        setPaying(false)
+        return
+      }
+
       setPaying(false)
-      return
+      toast(`${inst.label} marked as paid`, { variant: "success" })
+      setPayOpen(false)
+      setPayingId(null)
+      fetchInstallments()
+    } catch {
+      setPaying(false)
+      toast("We couldn't record that payment. Nothing was changed — please try again.", {
+        variant: "destructive",
+        duration: 10000,
+      })
     }
+  }
 
-    const { data: feeRow } = await supabase
-      .from("fees")
-      .select("id, paid_amount, pending_amount")
-      .eq("id", inst.feeId)
-      .maybeSingle()
+  async function handleUnmark(inst: Installment, reason: string) {
+    setUnmarkingId(inst.id)
 
-    if (feeRow) {
-      const newPaid = (feeRow.paid_amount || 0) + inst.amount
-      const newPending = Math.max(0, (feeRow.pending_amount || 0) - inst.amount)
-      await supabase.from("fees").update({ paid_amount: newPaid, pending_amount: newPending }).eq("id", inst.feeId)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+
+      if (!token) {
+        toast("Your session has expired. Please sign in again.", { variant: "destructive" })
+        setUnmarkingId(null)
+        return
+      }
+
+      const res = await fetch("/api/installments/unmark", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ installmentId: inst.id, reason }),
+      })
+
+      const json = (await res.json()) as { error?: string }
+
+      if (!res.ok) {
+        toast(json.error ?? "We couldn't reverse that installment. Nothing was changed.", {
+          variant: "destructive",
+          duration: 10000,
+        })
+        setUnmarkingId(null)
+        return
+      }
+
+      toast(`${inst.label} is back to unpaid, and ₹${inst.amount.toLocaleString("en-IN")} was credited back.`, {
+        variant: "success",
+      })
+      setUnmarkingId(null)
+      fetchInstallments()
+    } catch {
+      setUnmarkingId(null)
+      toast("We couldn't reverse that installment. Nothing was changed — please try again.", {
+        variant: "destructive",
+      })
     }
-
-    await supabase.from("payments").insert({
-      id: `PAY-${new Date().getTime()}`,
-      student_id: inst.studentId === "N/A" ? null : inst.studentId,
-      student_name: inst.studentName === "Unknown" ? "Student" : inst.studentName,
-      course_slug: inst.course === "N/A" ? null : inst.course,
-      amount: inst.amount,
-      payment_date: today,
-      method: "cash",
-      status: "Paid",
-      description: `Installment payment — ${inst.label}`,
-    })
-
-    setPaying(false)
-
-    toast("Installment marked as paid", { variant: "success" })
-    setPayOpen(false)
-    setPayingId(null)
-    fetchInstallments()
   }
 
   const handleExport = () => {
@@ -519,16 +585,37 @@ export default function InstallmentsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      {inst.status === "Pending" && (
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => { setPayingId(inst.id); setPayOpen(true) }}
-                          title="Mark as paid"
-                        >
-                          <CheckCircle2 className="size-4 text-emerald-600" />
-                        </Button>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {inst.status === "Pending" && (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => { setPayingId(inst.id); setPayOpen(true) }}
+                            title="Mark as paid"
+                          >
+                            <CheckCircle2 className="size-4 text-emerald-600" />
+                          </Button>
+                        )}
+                        {/* The reverse. Marking an installment paid used to be
+                            the only direction available, so a payment that never
+                            arrived could only be corrected by hand — and the
+                            ledger row stayed counted as revenue. */}
+                        {inst.status === "Paid" && (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => setConfirmUnmark(inst)}
+                            title="Mark as unpaid — payment not received"
+                            disabled={unmarkingId === inst.id}
+                          >
+                            {unmarkingId === inst.id ? (
+                              <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                            ) : (
+                              <RotateCcw className="size-4 text-amber-600" />
+                            )}
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 )
@@ -623,7 +710,11 @@ export default function InstallmentsPage() {
               if (!s) return null
               const count = parseInt(installmentCount)
               const remaining = s.total_fee - s.paid_amount
-              const perMonth = Math.ceil(remaining / count)
+              // Mirrors create_fee_schedule(): the last installment takes the
+              // remainder. The old preview used Math.ceil for every row, so it
+              // showed a per-month figure that added up to more than the fee.
+              const per = Math.floor(remaining / count)
+              const last = remaining - per * (count - 1)
               return (
                 <div className="rounded-lg bg-muted/50 p-3 space-y-1 text-sm">
                   <div className="flex justify-between">
@@ -635,12 +726,16 @@ export default function InstallmentsPage() {
                     <span className="font-medium">₹{s.paid_amount.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between border-t pt-1">
-                    <span className="text-muted-foreground">Remaining</span>
+                    <span className="text-muted-foreground">To Schedule</span>
                     <span className="font-medium">₹{remaining.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between border-t pt-1">
-                    <span className="font-semibold">Per Month ({count} months)</span>
-                    <span className="font-semibold text-primary">₹{perMonth.toLocaleString()}</span>
+                    <span className="font-semibold">Installments 1–{count - 1}</span>
+                    <span className="font-semibold text-primary">₹{per.toLocaleString()} each</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-semibold">Installment {count}</span>
+                    <span className="font-semibold text-primary">₹{last.toLocaleString()}</span>
                   </div>
                 </div>
               )
@@ -685,6 +780,74 @@ export default function InstallmentsPage() {
                   Confirm Payment
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!confirmUnmark}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirmUnmark(null)
+            setUnmarkReason("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RotateCcw className="size-5 text-amber-600" />
+              Mark as unpaid
+            </DialogTitle>
+            <DialogDescription>
+              Use this when the payment was never received, or was marked paid by mistake.
+            </DialogDescription>
+          </DialogHeader>
+
+          {confirmUnmark && (
+            <div className="rounded-lg bg-muted/50 p-3 text-sm">
+              <p className="font-medium">
+                {confirmUnmark.studentName} — {confirmUnmark.label}
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                ₹{confirmUnmark.amount.toLocaleString("en-IN")} will be credited back to this
+                student&rsquo;s outstanding balance.
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="unmarkReason">Reason</Label>
+            <Input
+              id="unmarkReason"
+              value={unmarkReason}
+              onChange={(e) => setUnmarkReason(e.target.value)}
+              placeholder="e.g. UPI reference never received"
+              autoFocus
+            />
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            The recorded payment is marked reversed rather than deleted, and this reason is
+            written onto it, so the ledger still shows what was claimed and why it was
+            withdrawn. It stops counting towards revenue immediately.
+          </p>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setConfirmUnmark(null); setUnmarkReason("") }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (confirmUnmark) handleUnmark(confirmUnmark, unmarkReason.trim())
+                setConfirmUnmark(null)
+                setUnmarkReason("")
+              }}
+              disabled={!unmarkReason.trim() || unmarkingId === confirmUnmark?.id}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              <RotateCcw className="size-4" />
+              Mark as unpaid
             </Button>
           </DialogFooter>
         </DialogContent>

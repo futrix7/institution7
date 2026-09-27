@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Phone, MessageCircle, MapPin, ArrowRight } from "lucide-react"
+import { Phone, MessageCircle, MapPin } from "lucide-react"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 

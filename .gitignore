@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the documented template must be tracked, or there is nothing to copy
+# from on a fresh clone. Only the literal filename, never .env.local.
+!.env.example
 
 # vercel
 .vercel

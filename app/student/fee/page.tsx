@@ -8,17 +8,22 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
-import { CheckCircle2, Clock, CreditCard, ExternalLink, Loader2 } from "lucide-react"
+import { CheckCircle2, Clock, CreditCard, ExternalLink, Loader2, ShieldQuestion, XCircle } from "lucide-react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/components/ui/sonner"
+import { AWAITING_VERIFICATION, PAYMENT_REJECTED } from "@/lib/payment-status"
+import { UpiPayBlock } from "@/components/student/upi-pay-block"
 
 interface Installment {
+  id: string
   label: string
   amount: number
   dueDate: string
   paidDate: string | null
   status: "Paid" | "Pending"
+  /** True while a payment claim for it sits with the institute, unreviewed. */
+  awaitingVerification: boolean
 }
 
 interface Extra {
@@ -36,6 +41,15 @@ interface FeeData {
   extras: Extra[]
 }
 
+/** One row per enrolled course — register_student() writes one fees row each. */
+interface FeeRow {
+  id: string
+  course_slug: string | null
+  total_fee: number
+  paid_amount: number
+  pending_amount: number
+}
+
 const fallbackFeeDetails: FeeData = {
   course: "Course",
   totalFee: 0,
@@ -49,61 +63,162 @@ export default function StudentFee() {
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
   const [feeDetails, setFeeDetails] = useState<FeeData>(fallbackFeeDetails)
-  const [feeId, setFeeId] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [studentId, setStudentId] = useState<string | null>(null)
-  const [courseSlug, setCourseSlug] = useState<string | null>(null)
-  const [studentName, setStudentName] = useState("")
+  const [awaitingVerification, setAwaitingVerification] = useState<{
+    count: number
+    amount: number
+  } | null>(null)
+  /**
+   * Claims the institute refused. Kept as raw rows rather than resolved labels
+   * because this fetch deliberately runs before the schedule is loaded, so a
+   * student who has no fee rows yet still learns a claim of theirs was turned
+   * down instead of finding a balance that moved for no visible reason.
+   */
+  const [rejectedClaims, setRejectedClaims] = useState<{
+    amount: number
+    installmentId: string | null
+  }[]>([])
 
   const paidPct = feeDetails.totalFee > 0 ? Math.round((feeDetails.paid / feeDetails.totalFee) * 100) : 0
   const extrasTotal = feeDetails.extras.reduce((sum, e) => sum + e.amount, 0)
 
   const [payOpen, setPayOpen] = useState(false)
-  const [amount, setAmount] = useState("")
   const [method, setMethod] = useState("upi")
+  const [reference, setReference] = useState("")
   const [paid, setPaid] = useState(false)
   const [paying, setPaying] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
 
   useEffect(() => {
     const fetchFeeData = async () => {
       setLoading(true)
+      setLoadError(null)
 
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { setLoading(false); return }
 
-      const { data: student } = await supabase
+      const { data: student, error: studentError } = await supabase
         .from("students")
-        .select("id, course_slug, full_name")
+        .select("id, course_slug, full_name, branch_id")
         .eq("user_id", user.id)
         .single()
+
+      if (studentError) {
+        console.error("[fee] student lookup failed:", studentError.message)
+        setLoadError("We couldn't load your fee details. Please refresh the page.")
+        setLoading(false)
+        return
+      }
 
       if (!student) { setLoading(false); return }
 
       setStudentId(student.id)
-      setCourseSlug(student.course_slug)
-      setStudentName(student.full_name ?? "")
 
-      const { data: fee } = await supabase
+      // Every enrolled course has its own fees row, so this is a list. It used to
+      // be read with .single(), which fails outright the moment a student enrols
+      // in two courses — the form allows six — and left the page showing zeros
+      // with a "Pay now" button that did nothing, because the single id it had
+      // held was never set.
+      const { data: feeRowsResult, error: feesError } = await supabase
         .from("fees")
-        .select("*")
+        .select("id, course_slug, total_fee, paid_amount, pending_amount")
         .eq("student_id", student.id)
-        .single()
 
-      if (!fee) { setLoading(false); return }
+      if (feesError) {
+        console.error("[fee] fees lookup failed:", feesError.message)
+        setLoadError("We couldn't load your fee details. Please refresh the page.")
+        setLoading(false)
+        return
+      }
 
-      setFeeId(fee.id)
+      const rows = (feeRowsResult ?? []) as FeeRow[]
+
+      // Read before the early return below, so a student with no fees rows yet
+      // still learns that money is already with the institute. This is the page
+      // that decides whether to pay again, and its "Pay Now" button is driven by
+      // `pending_amount` — which does not move until an admin reconciles the
+      // payment. Without this the student sees a full balance due for a fee they
+      // have already paid for, and pays twice.
+      const { data: pendingPayments } = await supabase
+        .from("payments")
+        .select("amount")
+        .eq("student_id", student.id)
+        .eq("status", AWAITING_VERIFICATION)
+
+      // Assigned unconditionally. Guarding on length left the banner in place
+      // after the last claim was reconciled, telling the student money was with
+      // the institute when it had already been credited or refused.
+      setAwaitingVerification(
+        pendingPayments && pendingPayments.length > 0
+          ? {
+              count: pendingPayments.length,
+              amount: pendingPayments.reduce(
+                (sum: number, p: { amount: number }) => sum + Number(p.amount),
+                0
+              ),
+            }
+          : null
+      )
+
+      // A refused claim is not a settled balance and not a claim in flight — the
+      // installment is payable again, and the student needs to be told that is
+      // why the amount came back.
+      const { data: rejectedPayments } = await supabase
+        .from("payments")
+        .select("amount, installment_id")
+        .eq("student_id", student.id)
+        .eq("status", PAYMENT_REJECTED)
+
+      setRejectedClaims(
+        (rejectedPayments ?? []).map((p: { amount: number; installment_id: string | null }) => ({
+          amount: Number(p.amount),
+          installmentId: p.installment_id ?? null,
+        }))
+      )
+
+      if (rows.length === 0) { setLoading(false); return }
+
+      const feeIds = rows.map((r) => r.id)
 
       const [installmentsRes, extrasRes] = await Promise.all([
-        supabase.from("fee_installments").select("*").eq("fee_id", fee.id),
-        supabase.from("fee_extras").select("*").eq("fee_id", fee.id),
+        supabase.from("fee_installments").select("*").in("fee_id", feeIds),
+        supabase.from("fee_extras").select("*").in("fee_id", feeIds),
       ])
 
-      const installments: Installment[] = (installmentsRes.data ?? []).map((i) => ({
-        label: i.label,
-        amount: i.amount,
-        dueDate: i.due_date,
-        paidDate: i.paid_date,
-        status: i.status === "Paid" ? "Paid" : "Pending",
-      }))
+      for (const failure of [installmentsRes.error, extrasRes.error]) {
+        if (failure) console.error("[fee] schedule lookup failed:", failure.message)
+      }
+
+      // Which installments already have an unreviewed claim against them. Without
+      // this the student could pay the same installment twice: the second claim
+      // would be filed, and verifying both would credit the fee row twice.
+      const claimedIds = new Set<string>()
+
+      if (pendingPayments && pendingPayments.length > 0) {
+        const { data: claimedRows } = await supabase
+          .from("payments")
+          .select("installment_id")
+          .eq("student_id", student.id)
+          .eq("status", AWAITING_VERIFICATION)
+          .not("installment_id", "is", null)
+
+        for (const row of claimedRows ?? []) {
+          if (row.installment_id) claimedIds.add(row.installment_id as string)
+        }
+      }
+
+      const installments: Installment[] = (installmentsRes.data ?? [])
+        .map((i) => ({
+          id: i.id as string,
+          label: i.label,
+          amount: Number(i.amount),
+          dueDate: i.due_date,
+          paidDate: i.paid_date,
+          status: i.status === "Paid" ? ("Paid" as const) : ("Pending" as const),
+          awaitingVerification: claimedIds.has(i.id as string),
+        }))
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
 
       const extras: Extra[] = (extrasRes.data ?? []).map((e) => ({
         label: e.label,
@@ -111,20 +226,37 @@ export default function StudentFee() {
         status: e.status === "Paid" ? "Paid" : "Pending",
       }))
 
-      const courseName = student.course_slug
-        ? student.course_slug.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())
-        : "Course"
+      // Named from the fee rows rather than students.course_slug, which only ever
+      // holds the first course of the enrolment.
+      const slugs = [...new Set(rows.map((r) => r.course_slug).filter((s): s is string => Boolean(s)))]
+
+      let courseName = "Course"
+      if (slugs.length > 0) {
+        const { data: courseRows, error: courseError } = await supabase
+          .from("courses")
+          .select("slug, name")
+          .in("slug", slugs)
+
+        if (courseError) {
+          console.error("[fee] course lookup failed:", courseError.message)
+        } else if (courseRows && courseRows.length > 0) {
+          courseName = courseRows.map((c) => c.name).join(", ")
+        }
+      }
+
+      const totalFee = rows.reduce((sum, r) => sum + Number(r.total_fee), 0)
+      const totalPaid = rows.reduce((sum, r) => sum + Number(r.paid_amount), 0)
+      const totalPending = rows.reduce((sum, r) => sum + Number(r.pending_amount), 0)
 
       setFeeDetails({
         course: courseName,
-        totalFee: fee.total_fee,
-        paid: fee.paid_amount,
-        pending: fee.pending_amount,
+        totalFee,
+        paid: totalPaid,
+        pending: totalPending,
         installments,
         extras,
       })
 
-      setAmount(fee.pending_amount.toString())
       setLoading(false)
     }
 
@@ -136,53 +268,122 @@ export default function StudentFee() {
     return d < new Date()
   }
 
-  const handlePay = async () => {
-    if (!amount || Number(amount) <= 0 || !studentId || !feeId) return
+  /** Outstanding installments a student can still pay, in schedule order. */
+  const payableInstallments = feeDetails.installments.filter(
+    (i) => i.status === "Pending" && !i.awaitingVerification
+  )
 
-    setPaying(true)
-    const payAmount = Number(amount)
-    const paymentId = `PAY-${Date.now()}`
+  /**
+   * Refused claims, resolved to installment names. The payment rows only carry
+   * the installment id, and the schedule is the sole place that turns it back
+   * into something a student recognises — so the lookup lives here, after
+   * `feeDetails` is filled, rather than in the fetch.
+   *
+   * Counted by distinct installment rather than by payment row: someone whose
+   * claim was refused twice for the same installment still owes it once.
+   */
+  const rejectedLabels = [
+    ...new Set(
+      rejectedClaims
+        .map((c) => c.installmentId)
+        .filter((id): id is string => Boolean(id))
+        .map((id) => feeDetails.installments.find((i) => i.id === id)?.label)
+        .filter((label): label is string => Boolean(label))
+    ),
+  ]
+  const rejectedTotal = rejectedClaims.reduce((sum, c) => sum + c.amount, 0)
 
-    const studentNameValue = studentName || feeDetails.course
+  const selectedTotal = feeDetails.installments
+    .filter((i) => selectedIds.includes(i.id))
+    .reduce((sum, i) => sum + i.amount, 0)
 
-    const { error: paymentErr } = await supabase.from("payments").insert({
-      id: paymentId,
-      student_id: studentId,
-      student_name: studentNameValue,
-      course_slug: courseSlug,
-      amount: payAmount,
-      payment_date: new Date().toISOString().split("T")[0],
-      method,
-      status: "Paid",
+  const MAX_SELECTED = 3
+
+  function toggleInstallment(id: string) {
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id)
+      if (prev.length >= MAX_SELECTED) {
+        toast(`You can pay up to ${MAX_SELECTED} installments at a time.`, { variant: "warning" })
+        return prev
+      }
+      return [...prev, id]
     })
+  }
 
-    if (paymentErr) {
-      toast("Payment failed: " + paymentErr.message, { variant: "destructive" })
-      setPaying(false)
+  function selectAllPayable() {
+    setSelectedIds(payableInstallments.map((i) => i.id))
+  }
+
+  async function handlePay(payAll = false) {
+    if (paying || !studentId) return
+
+    if (!payAll && selectedIds.length === 0) {
+      toast("Select at least one installment to pay.", { variant: "warning" })
       return
     }
 
-    const newPaid = feeDetails.paid + payAmount
-    const newPending = Math.max(0, feeDetails.totalFee - newPaid)
+    setPaying(true)
 
-    const { error: feeErr } = await supabase
-      .from("fees")
-      .update({ paid_amount: newPaid, pending_amount: newPending })
-      .eq("id", feeId)
+    try {
+      // The endpoint verifies the session server-side and resolves the
+      // outstanding set itself when payAll is set, rather than trusting a list
+      // of ids from the browser.
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
 
-    if (feeErr) {
-      toast("Payment recorded but fee update failed: " + feeErr.message, { variant: "destructive" })
-    }
-
-    setPaid(true)
-    setTimeout(() => {
-      setPayOpen(false)
-      setTimeout(() => {
-        setPaid(false)
+      if (!token) {
+        toast("Your session has expired. Please sign in again.", { variant: "destructive" })
         setPaying(false)
-        setFeeDetails((prev) => ({ ...prev, paid: newPaid, pending: newPending }))
-      }, 300)
-    }, 1500)
+        return
+      }
+
+      const res = await fetch("/api/installments/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          installmentIds: payAll ? undefined : selectedIds,
+          payAll,
+          method,
+          reference,
+        }),
+      })
+
+      const json = (await res.json()) as { error?: string; count?: number; amount?: number }
+
+      if (!res.ok) {
+        toast(json.error ?? "We couldn't record your payment. Nothing was charged.", {
+          variant: "destructive",
+        })
+        setPaying(false)
+        return
+      }
+
+      // The claim is filed, not settled. Say so plainly — the balance only moves
+      // once the institute verifies the reference.
+      toast(
+        `₹${(json.amount ?? 0).toLocaleString("en-IN")} claimed for ${json.count} installment${json.count === 1 ? "" : "s"}. Awaiting verification.`,
+        { variant: "success", duration: 6000 }
+      )
+
+      setSelectedIds([])
+      setReference("")
+      setPaid(true)
+      setTimeout(() => {
+        setPayOpen(false)
+        setTimeout(() => {
+          setPaid(false)
+          setPaying(false)
+        }, 300)
+      }, 1800)
+    } catch {
+      setPaying(false)
+      toast("We couldn't record your payment. Nothing was charged — please try again.", {
+        variant: "destructive",
+      })
+    }
   }
 
   if (loading) {
@@ -190,6 +391,16 @@ export default function StudentFee() {
       <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6 lg:px-8 lg:py-10">
         <div className="flex items-center justify-center py-20">
           <div className="size-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6 lg:px-8 lg:py-10">
+        <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
+          {loadError}
         </div>
       </div>
     )
@@ -209,7 +420,15 @@ export default function StudentFee() {
             <span className="sm:hidden">History</span>
           </Link>
           <Dialog open={payOpen} onOpenChange={setPayOpen}>
-            <DialogTrigger render={<Button size="sm" className="gap-1.5 px-3 py-2 text-sm h-auto" />}>
+            <DialogTrigger
+              render={
+                <Button
+                  size="sm"
+                  className="gap-1.5 px-3 py-2 text-sm h-auto"
+                  disabled={feeDetails.pending <= 0}
+                />
+              }
+            >
               <CreditCard className="size-4" />
               Pay Now
             </DialogTrigger>
@@ -222,19 +441,87 @@ export default function StudentFee() {
                   <div className="size-16 mx-auto rounded-full bg-emerald-100 flex items-center justify-center">
                     <CheckCircle2 className="size-8 text-emerald-600" />
                   </div>
-                  <p className="font-semibold text-emerald-600">Payment Successful!</p>
+                  <p className="font-semibold text-emerald-600">Payment submitted!</p>
+                  <p className="text-sm text-muted-foreground">
+                    Our team will verify your reference and your balance will update.
+                  </p>
+                </div>
+              ) : payableInstallments.length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  {feeDetails.installments.length === 0
+                    ? "You have no installment schedule yet."
+                    : "Every installment is either paid or already awaiting verification."}
                 </div>
               ) : (
                 <div className="space-y-4 pt-2">
                   <div className="space-y-2">
-                    <Label htmlFor="pay-amount">Amount (₹)</Label>
-                    <Input
-                      id="pay-amount"
-                      type="number"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                    />
+                    <div className="flex items-center justify-between">
+                      <Label>Choose installments</Label>
+                      {payableInstallments.length > MAX_SELECTED && (
+                        <button
+                          type="button"
+                          onClick={selectAllPayable}
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          Select all {payableInstallments.length}
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      {payableInstallments.map((inst) => {
+                        const checked = selectedIds.includes(inst.id)
+                        const atCap = !checked && selectedIds.length >= MAX_SELECTED
+                        return (
+                          <label
+                            key={inst.id}
+                            className={`flex items-center justify-between rounded-lg border p-3 transition-colors ${
+                              checked
+                                ? "border-primary bg-primary/5"
+                                : atCap
+                                  ? "cursor-not-allowed border-border opacity-50"
+                                  : "cursor-pointer border-border hover:bg-muted/50"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={atCap}
+                                onChange={() => toggleInstallment(inst.id)}
+                                className="size-4 accent-primary"
+                              />
+                              <div>
+                                <p className="text-sm font-medium">{inst.label}</p>
+                                <p className="text-xs text-muted-foreground">Due {inst.dueDate}</p>
+                              </div>
+                            </div>
+                            <p className="text-sm font-semibold">
+                              ₹{inst.amount.toLocaleString("en-IN")}
+                            </p>
+                          </label>
+                        )
+                      })}
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Select up to {MAX_SELECTED} installments, or pay everything at once below.
+                    </p>
                   </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="pay-reference">UPI reference (optional)</Label>
+                    <Input
+                      id="pay-reference"
+                      value={reference}
+                      onChange={(e) => setReference(e.target.value)}
+                      placeholder="Enter the transaction ID"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This helps us verify your payment faster. We check it by hand.
+                    </p>
+                  </div>
+
                   <div className="space-y-2">
                     <Label>Payment Method</Label>
                     <div className="space-y-2">
@@ -257,15 +544,101 @@ export default function StudentFee() {
                       ))}
                     </div>
                   </div>
-                  <Button className="w-full" onClick={handlePay} disabled={!amount || Number(amount) <= 0}>
-                    Confirm Payment
-                  </Button>
+
+                  {/* Only for UPI: a QR to scan or a number to read out is
+                      meaningless when the student is walking into the institute
+                      with cash, or transferring from a bank branch. */}
+                  {method === "upi" && (
+                    <UpiPayBlock
+                      amount={selectedTotal > 0 ? selectedTotal : null}
+                      note="Pay the amount above, then confirm. Our team verifies the reference before the balance updates."
+                    />
+                  )}
+
+                  <div className="space-y-2">
+                    <Button
+                      className="w-full gap-2"
+                      onClick={() => handlePay(false)}
+                      disabled={paying || selectedIds.length === 0}
+                    >
+                      {paying ? (
+                        <>
+                          <Loader2 className="size-4 animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          <CreditCard className="size-4" />
+                          Pay {selectedTotal > 0 ? `₹${selectedTotal.toLocaleString("en-IN")}` : ""}
+                          {selectedIds.length > 0 && ` (${selectedIds.length})`}
+                        </>
+                      )}
+                    </Button>
+
+                    {payableInstallments.length > MAX_SELECTED && (
+                      <Button
+                        variant="outline"
+                        className="w-full gap-2"
+                        onClick={() => handlePay(true)}
+                        disabled={paying}
+                      >
+                        <CheckCircle2 className="size-4" />
+                        Pay all {payableInstallments.length} remaining (
+                        {payableInstallments.reduce((s, i) => s + i.amount, 0).toLocaleString("en-IN")})
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
             </DialogContent>
           </Dialog>
         </div>
       </div>
+
+      {/* Verification */}
+      {awaitingVerification && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 sm:p-5">
+          <div className="flex items-start gap-3">
+            <ShieldQuestion className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                {awaitingVerification.count === 1 ? "Payment" : "Payments"} awaiting verification
+              </p>
+              <p className="mt-0.5 text-xs sm:text-sm text-muted-foreground">
+                &nbsp;&#8377;{awaitingVerification.amount.toLocaleString("en-IN")} is already with us
+                and is counted in the remaining balance below. Our team checks every UPI reference
+                by hand. Please wait for it to clear before paying this amount again.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Refusal — sits above the balance because it explains why an amount the
+          student thought was cleared is due again. Without it the installment
+          silently becomes payable a second time and reads as a double charge. */}
+      {rejectedClaims.length > 0 && (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 sm:p-5">
+          <div className="flex items-start gap-3">
+            <XCircle className="size-5 shrink-0 text-destructive" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-destructive">
+                {rejectedClaims.length === 1
+                  ? "Payment refused"
+                  : `${rejectedClaims.length} payments refused`}
+              </p>
+              <p className="mt-0.5 text-xs sm:text-sm text-muted-foreground">
+                &nbsp;&#8377;{rejectedTotal.toLocaleString("en-IN")} was not accepted, so no money
+                was counted and it is due again. Nothing is owed twice — the installments below can
+                be paid again with a reference our team can check.
+              </p>
+              {rejectedLabels.length > 0 && (
+                <p className="mt-1 text-xs sm:text-sm font-medium">{rejectedLabels.join(", ")}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Overview */}
       <Card className="bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
@@ -293,11 +666,18 @@ export default function StudentFee() {
         <CardContent className="p-5 sm:p-6 lg:p-8">
           <h2 className="text-base sm:text-lg lg:text-xl font-semibold mb-4 lg:mb-6">Installment Schedule</h2>
           <div className="space-y-3">
-            {feeDetails.installments.map((inst, i) => (
-              <div key={i} className="flex items-center justify-between rounded-xl border border-border p-3 sm:p-4 lg:p-5">
+            {feeDetails.installments.map((inst) => (
+              <div
+                key={inst.id}
+                className={`flex items-center justify-between rounded-xl border p-3 sm:p-4 lg:p-5 ${
+                  inst.awaitingVerification ? "border-amber-500/40 bg-amber-500/5" : "border-border"
+                }`}
+              >
                 <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                   {inst.status === "Paid" ? (
                     <CheckCircle2 className="size-5 lg:size-6 text-emerald-600 shrink-0" />
+                  ) : inst.awaitingVerification ? (
+                    <ShieldQuestion className="size-5 lg:size-6 text-amber-600 shrink-0" />
                   ) : (
                     <Clock className="size-5 lg:size-6 text-amber-600 shrink-0" />
                   )}
@@ -306,23 +686,47 @@ export default function StudentFee() {
                     <p className="text-xs lg:text-sm text-muted-foreground truncate">
                       Due: {inst.dueDate}{inst.paidDate ? ` · Paid: ${inst.paidDate}` : ""}
                     </p>
-                    {inst.status === "Pending" && isOverdue(inst.dueDate) && (
+                    {inst.awaitingVerification && (
+                      <p className="text-[11px] lg:text-xs text-amber-700 dark:text-amber-400 font-medium mt-0.5">
+                        Payment received — awaiting verification
+                      </p>
+                    )}
+                    {!inst.awaitingVerification && inst.status === "Pending" && isOverdue(inst.dueDate) && (
                       <p className="text-[11px] lg:text-xs text-red-600 font-medium mt-0.5">Overdue</p>
                     )}
                   </div>
                 </div>
                 <div className="text-right shrink-0 ml-4">
                   <p className="text-sm lg:text-base font-bold">₹{inst.amount.toLocaleString()}</p>
-                  {inst.status === "Pending" && isOverdue(inst.dueDate) ? (
+                  {inst.awaitingVerification ? (
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] lg:text-xs bg-amber-500/15 text-amber-600"
+                    >
+                      Awaiting verification
+                    </Badge>
+                  ) : inst.status === "Pending" && isOverdue(inst.dueDate) ? (
                     <Badge variant="destructive" className="text-[10px] lg:text-xs">Overdue</Badge>
                   ) : (
-                    <Badge variant="secondary" className={`text-[10px] lg:text-xs ${inst.status === "Paid" ? "bg-emerald-500/15 text-emerald-600" : "bg-amber-500/15 text-amber-600"}`}>
+                    <Badge
+                      variant="secondary"
+                      className={`text-[10px] lg:text-xs ${
+                        inst.status === "Paid"
+                          ? "bg-emerald-500/15 text-emerald-600"
+                          : "bg-amber-500/15 text-amber-600"
+                      }`}
+                    >
                       {inst.status}
                     </Badge>
                   )}
                 </div>
               </div>
             ))}
+            {feeDetails.installments.length === 0 && (
+              <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                No installment schedule yet. Contact the institute to set one up.
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>

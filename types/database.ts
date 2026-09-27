@@ -412,6 +412,7 @@ export interface Database {
           status: "Paid" | "Pending" | "Partial" | "Overdue"
           receipt_no: string | null
           description: string | null
+          branch_id: string | null
           created_at: string
         }
         Insert: {
@@ -425,6 +426,7 @@ export interface Database {
           status?: "Paid" | "Pending" | "Partial" | "Overdue"
           receipt_no?: string | null
           description?: string | null
+          branch_id?: string | null
           created_at?: string
         }
         Update: {
@@ -438,6 +440,7 @@ export interface Database {
           status?: "Paid" | "Pending" | "Partial" | "Overdue"
           receipt_no?: string | null
           description?: string | null
+          branch_id?: string | null
           created_at?: string
         }
       }
@@ -746,7 +749,33 @@ export interface Database {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      /**
+       * Creates a student, one fees row and fee_installments row per course, and
+       * a pending payments row, in a single transaction. Prices courses from
+       * courses.fee_numeric. Added by supabase.sql; service_role
+       * only, so the browser never calls it directly.
+       */
+      register_student: {
+        Args: {
+          p_user_id: string
+          p_full_name: string
+          p_email: string
+          p_phone: string
+          p_father_name: string
+          p_father_phone: string
+          p_branch_id: string
+          p_course_slugs: string[]
+          p_present_status: string
+          p_signature: string
+          p_payment_method: string
+          p_payment_description: string
+        }
+        Returns: {
+          student_id: string
+          payment_id: string
+          total_fee: number
+        }[]
+      }
     }
     Enums: {
       course_type: "long-term" | "short-term"

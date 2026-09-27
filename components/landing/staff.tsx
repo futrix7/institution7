@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase"
 
 const fallbackFaculty = [
   {
+    id: "fallback-1",
     name: "Mr. Mada Eswar Rao",
     role: "Founder & Director",
     branch: "Ramanthapur",
@@ -16,6 +17,7 @@ const fallbackFaculty = [
     is_founder: true,
   },
   {
+    id: "fallback-2",
     name: "Mrs. S Sowmya",
     role: "Manager",
     branch: "Ramanthapur",
@@ -24,6 +26,7 @@ const fallbackFaculty = [
     is_founder: false,
   },
   {
+    id: "fallback-3",
     name: "Mr. V Rajesh",
     role: "Coding Trainer",
     branch: "Ramanthapur",
@@ -32,6 +35,7 @@ const fallbackFaculty = [
     is_founder: false,
   },
   {
+    id: "fallback-4",
     name: "Mrs. K Lavanya",
     role: "Computer Trainer",
     branch: "Ramanthapur",
@@ -40,6 +44,7 @@ const fallbackFaculty = [
     is_founder: false,
   },
   {
+    id: "fallback-5",
     name: "Mrs. P Soundarya",
     role: "Accountant",
     branch: "Ramanthapur",
@@ -50,12 +55,40 @@ const fallbackFaculty = [
 ]
 
 interface FacultyRow {
+  id: string
   name: string
   role: string
   branch: string | null
   qualifications: string[]
   description: string | null
   is_founder: boolean
+}
+
+/**
+ * A person is identified by name and role together.
+ *
+ * `name` alone is not enough: two trainers can share it. Used to collapse repeat
+ * rows, because `faculty` has no unique key and an unguarded seed appends a fresh
+ * copy of the whole team on every run of supabase.sql. The migration now
+ * de-duplicates the table, but a page that renders one card per row should not
+ * depend on that having been applied to be correct.
+ */
+function facultyIdentity(row: FacultyRow): string {
+  return `${row.name}::${row.role}`
+}
+
+function uniqueFaculty(rows: FacultyRow[]): FacultyRow[] {
+  const seen = new Set<string>()
+  const kept: FacultyRow[] = []
+
+  for (const row of rows) {
+    const identity = facultyIdentity(row)
+    if (seen.has(identity)) continue
+    seen.add(identity)
+    kept.push(row)
+  }
+
+  return kept
 }
 
 const containerVariants = {
@@ -80,17 +113,27 @@ export function Staff() {
       try {
         const { data, error } = await supabase
           .from("faculty")
-          .select("name, role, branch, qualifications, description, is_founder")
+          .select("id, name, role, branch, qualifications, description, is_founder")
           .order("is_founder", { ascending: false })
 
         if (!active) return
 
-        if (error || !data || data.length === 0) {
+        if (error) {
+          console.error("[landing] faculty lookup failed:", error.message)
           applyFallback()
           return
         }
 
-        const rows = data as FacultyRow[]
+        if (!data || data.length === 0) {
+          // Not the same fault as a failed query, and worth saying so: the page
+          // is about to render the hardcoded team, which looks correct and is not
+          // what the database holds.
+          console.error("[landing] faculty returned no rows — falling back to the hardcoded team.")
+          applyFallback()
+          return
+        }
+
+        const rows = uniqueFaculty(data as FacultyRow[])
         setDirector(rows.find((f) => f.is_founder) ?? rows[0] ?? null)
         setMembers(rows.filter((f) => !f.is_founder))
       } catch {
@@ -180,9 +223,9 @@ export function Staff() {
 
                     {director.qualifications?.length > 0 && (
                       <div className="mt-4 flex flex-wrap gap-2">
-                        {director.qualifications.map((q) => (
+                        {director.qualifications.map((q, i) => (
                           <span
-                            key={q}
+                            key={`${q}-${i}`}
                             className="inline-flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-[11px] font-semibold text-muted-foreground sm:text-xs"
                           >
                             <GraduationCap className="size-3.5 text-primary" />
@@ -206,7 +249,7 @@ export function Staff() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
                 {members.map((member) => (
                   <motion.div
-                    key={member.name}
+                    key={member.id}
                     variants={cardVariants}
                     className="group rounded-2xl border border-border/60 bg-card p-4 transition-all duration-200 hover:border-primary/15 hover:shadow-sm sm:p-5"
                   >
@@ -226,9 +269,9 @@ export function Staff() {
                     )}
                     {member.qualifications?.length > 0 && (
                       <p className="mt-2 flex flex-wrap gap-1">
-                        {member.qualifications.map((q) => (
+                        {member.qualifications.map((q, i) => (
                           <span
-                            key={q}
+                            key={`${q}-${i}`}
                             className="rounded-md bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                           >
                             {q}

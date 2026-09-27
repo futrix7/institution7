@@ -24,6 +24,7 @@ import {
   Award,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { EmptyState, QueryError } from "@/components/student/data-state"
 import { useToast } from "@/components/ui/sonner"
 
 interface Profile {
@@ -76,22 +77,37 @@ export default function StudentProfile() {
   const [editEmail, setEditEmail] = useState("")
   const [editPhone, setEditPhone] = useState("")
   const [editAddress, setEditAddress] = useState("")
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     async function fetchProfile() {
+      setLoadError(null)
+
       const { data: { user }, error: authError } = await supabase.auth.getUser()
       if (authError || !user) {
+        setLoadError(authError?.message ?? "No signed-in user was found")
         setLoading(false)
         return
       }
 
-      const { data: student } = await supabase
+      const { data: student, error: studentError } = await supabase
         .from("students")
         .select("*, courses(name), branches(name)")
         .eq("user_id", user.id)
         .single()
 
-      if (student) {
+      // Previously `if (student)` with no error branch, so a failed read left
+      // `profile` null and rendered an empty profile card full of em-dashes —
+      // indistinguishable from a student who has genuinely filled in nothing.
+      if (studentError || !student) {
+        console.error("[profile] lookup failed:", studentError?.message ?? "no student row")
+        setLoadError(studentError?.message ?? "No student record is linked to this account")
+        setLoading(false)
+        return
+      }
+
+      {
         const s = student
         const p: Profile = {
           name: s.full_name,
@@ -118,7 +134,7 @@ export default function StudentProfile() {
       setLoading(false)
     }
     fetchProfile()
-  }, [])
+  }, [attempt])
 
   const handleSave = async () => {
     if (!editName.trim() || !editPhone.trim()) {
@@ -164,6 +180,29 @@ export default function StudentProfile() {
     return (
       <div className="flex items-center justify-center p-12">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-2xl p-4 sm:p-6 lg:p-8">
+        <QueryError
+          what="your profile"
+          detail={loadError}
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </div>
+    )
+  }
+
+  if (!profile) {
+    return (
+      <div className="mx-auto max-w-2xl p-4 sm:p-6 lg:p-8">
+        <EmptyState
+          title="No profile to show"
+          description="We could not find a student record for this sign-in. If you have just registered, your enrollment may still be being set up — contact the institute."
+        />
       </div>
     )
   }

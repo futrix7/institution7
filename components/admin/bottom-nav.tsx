@@ -2,20 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import {
-  LayoutDashboard,
-  Users,
-  GraduationCap,
-  BookOpen,
-  CalendarCheck,
-  CreditCard,
-  Wallet,
-  BarChart3,
-  UserCircle,
-  Video,
-  Megaphone,
-  IndianRupee,
-} from "lucide-react"
+import { LayoutDashboard, Users, BookOpen, BarChart3, IndianRupee } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const bottomNavLinks = [

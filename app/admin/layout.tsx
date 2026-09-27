@@ -24,6 +24,8 @@ import {
 import { useTheme } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
 import { BottomNav } from "@/components/admin/bottom-nav"
+import { AuthGuard } from "@/components/auth/auth-guard"
+import { SignOutButton } from "@/components/auth/sign-out-button"
 
 const sidebarLinks = [
   { label: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
@@ -68,6 +70,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
+    <AuthGuard role="admin">
     <div className="flex h-screen bg-background">
       {sidebarOpen && (
         <div
@@ -119,8 +122,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           })}
         </nav>
 
-        <div className="border-t border-border p-3">
+        <div className="space-y-1 border-t border-border p-3">
           <ThemeToggle />
+          <SignOutButton role="admin" />
         </div>
       </aside>
 
@@ -139,5 +143,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       <BottomNav />
     </div>
+    </AuthGuard>
   )
 }

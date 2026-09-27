@@ -74,11 +74,11 @@ export function UploadVideoSheet({ open, onOpenChange, onSuccess }: UploadVideoS
       onSubmit={handleSubmit}
     >
       <FormField label="Video Title" htmlFor="title">
-        <Input id="title" placeholder="e.g. Python Basics - Variables" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <Input id="title" placeholder="Enter the video title" value={title} onChange={(e) => setTitle(e.target.value)} />
       </FormField>
 
       <FormField label="Video URL" htmlFor="url">
-        <Input id="url" type="url" placeholder="https://youtube.com/watch?v=..." value={url} onChange={(e) => setUrl(e.target.value)} />
+        <Input id="url" type="url" placeholder="Enter the video URL" value={url} onChange={(e) => setUrl(e.target.value)} />
       </FormField>
 
       <div className="grid grid-cols-2 gap-3">
@@ -101,7 +101,7 @@ export function UploadVideoSheet({ open, onOpenChange, onSuccess }: UploadVideoS
           </Select>
         </FormField>
         <FormField label="Duration" htmlFor="duration">
-          <Input id="duration" placeholder="e.g. 45:20" value={duration} onChange={(e) => setDuration(e.target.value)} />
+          <Input id="duration" placeholder="Enter the duration" value={duration} onChange={(e) => setDuration(e.target.value)} />
         </FormField>
       </div>
     </FormSheet>

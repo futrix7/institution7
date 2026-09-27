@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   CalendarCheck,
   Search,
@@ -51,10 +51,9 @@ export default function AttendancePage() {
   const [saving, setSaving] = useState(false);
   const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]);
   const [exportOpen, setExportOpen] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
   const savedStatuses = useRef(new Map<string, AttendanceStatus>());
 
-  async function fetchAttendance() {
+  const fetchAttendance = useCallback(async () => {
     setLoading(true);
 
     const [attendanceRes, studentsRes] = await Promise.all([
@@ -133,12 +132,12 @@ export default function AttendancePage() {
     savedStatuses.current = new Map(records.map((r) => [r.studentId, r.status]));
 
     setLoading(false);
-  }
+  }, [date]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time data fetch
     fetchAttendance();
-  }, [date, reloadKey]);
+  }, [fetchAttendance]);
 
   const filteredData = attendanceData.filter((student) => {
     const matchesSearch =
@@ -202,7 +201,9 @@ export default function AttendancePage() {
     }
 
     toast("Attendance saved successfully", { variant: "success" });
-    setReloadKey((k) => k + 1);
+    // Refetch directly instead of through a reload counter, so the effect only
+    // ever depends on the date it is actually keyed to.
+    await fetchAttendance();
   }
 
   return (

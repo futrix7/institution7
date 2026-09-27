@@ -90,7 +90,7 @@ export function AnnouncementDialog({ open, onOpenChange, onSuccess }: Announceme
             <Label htmlFor="a-title">Title</Label>
             <Input
               id="a-title"
-              placeholder="e.g. Holiday Notice"
+              placeholder="Enter the title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />

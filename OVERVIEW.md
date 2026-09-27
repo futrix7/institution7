@@ -74,7 +74,9 @@ institution/
 │   └── utils.ts            # cn() helper
 ├── data/
 │   └── hero-images.ts      # Hero carousel images
-└── supabase-schema.sql     # Full database schema
+└── supabase.sql       # Schema, functions, RLS, grants, policies (apply first)
+    supabase-seed.sql # Reference data: branches, courses, faculty (apply second)
+    supabase-verify.sql # Read-only deploy checks, run by hand
 ```
 
 ---

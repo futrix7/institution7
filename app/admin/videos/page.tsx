@@ -13,18 +13,7 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table"
-import {
-  Search,
-  Plus,
-  Play,
-  Eye,
-  Trash2,
-  Edit,
-  Upload,
-  Film,
-  Clock,
-  ArrowRight,
-} from "lucide-react"
+import { Search, Play, Upload, Clock, ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { UploadVideoSheet } from "@/components/admin/upload-video-sheet"
 import { supabase } from "@/lib/supabase"

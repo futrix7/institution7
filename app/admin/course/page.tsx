@@ -1,18 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  Plus,
-  Clock,
-  Users,
-  BookOpen,
-  Star,
-  Edit,
-  Trash2,
-  TrendingUp,
-  Award,
-  Loader2,
-} from "lucide-react";
+import { Plus, Clock, Star, Edit, Trash2, TrendingUp, Award, Loader2 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

@@ -35,6 +35,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
+import { ROLE_LOGIN } from "@/hooks/use-auth"
 
 const themeOptions = [
   { value: "light", label: "Light", icon: Sun, description: "Light mode" },
@@ -132,7 +133,7 @@ export default function StudentSettings() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
-    router.push("/auth/user/login")
+    router.replace(ROLE_LOGIN.student)
   }
 
   const toggleItems = [

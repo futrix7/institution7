@@ -35,6 +35,7 @@ import {
   CreditCard,
   BarChart3,
   Lock,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ExportDialog } from "@/components/admin/export-dialog";
@@ -108,6 +109,7 @@ export default function AdminFinancePage() {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
 
   const [summaryCards, setSummaryCards] = useState<SummaryCard[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlyDatum[]>([]);
@@ -122,9 +124,22 @@ export default function AdminFinancePage() {
     setLoading(true);
     setError(false);
     try {
+      // The endpoint verifies the session server-side; without the token it
+      // cannot tell an administrator from an anonymous visitor.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      if (!token) {
+        setError(true);
+        return;
+      }
+
       const res = await fetch("/api/verify-pin", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ pin }),
       });
       const data = await res.json();
@@ -146,6 +161,8 @@ export default function AdminFinancePage() {
   useEffect(() => {
     if (!authenticated) return;
 
+    let active = true;
+
     async function fetchFinanceData() {
       setDataLoading(true);
 
@@ -155,6 +172,32 @@ export default function AdminFinancePage() {
         supabase.from("courses").select("slug, name"),
         supabase.from("branches").select("id, name"),
       ]);
+
+      // Checked explicitly rather than folded into `|| []`. This page selects
+      // `branch_id` from `payments`, a column that did not exist for a while, and
+      // PostgREST rejects the whole query when one selected column is unknown.
+      // Because every result was defaulted to an empty array, that failure made
+      // the payment list and the branch chart render as "no data" — a page that
+      // looked correct and was quietly wrong. An unrun migration is a real
+      // operator problem and should say so.
+      const failures = [
+        transactionsResult.error,
+        paymentsResult.error,
+        coursesResult.error,
+        branchesResult.error,
+      ].filter((e): e is NonNullable<typeof e> => e !== null);
+
+      if (failures.length > 0) {
+        if (!active) return;
+        for (const failure of failures) {
+          console.error("[finance] query failed:", failure.message);
+        }
+        setDataError(
+          "Some finance data could not be loaded. This usually means the database schema is out of date — apply supabase.sql."
+        );
+        setDataLoading(false);
+        return;
+      }
 
       const transactions = transactionsResult.data || [];
       const payments = paymentsResult.data || [];
@@ -310,7 +353,16 @@ export default function AdminFinancePage() {
       setDataLoading(false);
     }
 
-    fetchFinanceData();
+    fetchFinanceData().catch((err) => {
+      console.error("[finance] load crashed:", err);
+      if (!active) return;
+      setDataError("We couldn't load the finance data. Please try again.");
+      setDataLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
   }, [authenticated]);
 
   return (
@@ -324,8 +376,7 @@ export default function AdminFinancePage() {
           </p>
         </div>
         {authenticated && (
-          <Button variant="outline" className="gap-2" onClick={() => setExportOpen(true)}>
-            <Download className="h-4 w-4" />
+          <Button variant="outline" className="gap-2" onClick={() => setExportOpen(true)}>            <Download className="h-4 w-4" />
             Export Report
           </Button>
         )}
@@ -403,6 +454,14 @@ export default function AdminFinancePage() {
           {dataLoading ? (
             <div className="flex items-center justify-center h-64">
               <p className="text-muted-foreground">Loading financial data...</p>
+            </div>
+          ) : dataError ? (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            >
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <p>{dataError}</p>
             </div>
           ) : (
             <>

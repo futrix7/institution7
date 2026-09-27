@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import { QRCodeSVG } from "qrcode.react"
+import { buildUpiUri, UPI_CONTACT_NUMBER } from "@/lib/upi"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -23,6 +24,7 @@ import {
   Lock,
   ArrowRight,
   ArrowLeft,
+  ArrowUpRight,
   Check,
   BookOpen,
   MapPin,
@@ -37,70 +39,89 @@ import {
   Globe,
   Database,
   Cloud,
+  Layers,
   Loader2,
-  Shield,
   CreditCard,
   CheckCircle2,
-  RefreshCw,
   Hash,
+  AlertTriangle,
+  LogIn,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/components/ui/sonner"
+import { describeAuthError } from "@/lib/errors"
 import type { Variants, Transition } from "framer-motion"
 
-const branches = [
-  { value: "ramanthapur", label: "Ramanthapur (Main)" },
-  { value: "amberpet", label: "Amberpet" },
-  { value: "kodad", label: "Kodad" },
-]
+type CourseCategory = "basic" | "programming" | "web" | "data" | "cloud" | "other"
 
-const courseNames = [
-  "DCA", "ADCA", "Tally", "C", "PGDCA", "Java", "Python",
-  "PGJPL", "PGPPL", "Data Science", "Java Fullstack", "Python Fullstack",
-  "AWS", "Azure", "Power BI", "HTML & CSS", "JavaScript", "Bootstrap",
-  "ReactJS", "ADWD",
-] as const
-
-interface CourseInfo {
-  name: string
+interface CourseOption {
   slug: string
+  name: string
   duration: string
-  fee: string
+  fee: number
   description: string
-  category: "basic" | "programming" | "web" | "data" | "cloud"
-  popular?: boolean
+  category: CourseCategory
+  popular: boolean
 }
 
-const courseInfo: Record<string, CourseInfo> = {
-  "DCA":            { name: "DCA",            slug: "dca",            duration: "40 Days", fee: "₹3,000",  description: "Computer basics, MS-Word, Excel, PowerPoint, Internet", category: "basic" },
-  "ADCA":           { name: "ADCA",           slug: "adca",           duration: "2 Months", fee: "₹5,000",  description: "Advanced computer course with Tally Prime & GST", category: "basic" },
-  "Tally":          { name: "Tally PRIME",    slug: "tally-prime",    duration: "30 Days", fee: "₹3,500",  description: "Accounting, GST, inventory & payroll management", category: "basic" },
-  "C":              { name: "C Language",      slug: "c-language",      duration: "35 Days", fee: "₹3,000",  description: "C programming fundamentals", category: "programming" },
-  "PGDCA":          { name: "PGDCA",          slug: "pgdca",          duration: "2 Months", fee: "₹6,000",  description: "Post graduate diploma — MS-Office + C Language", category: "basic" },
-  "Java":           { name: "Core Java",       slug: "core-java",       duration: "45 Days", fee: "₹5,000",  description: "Java fundamentals, OOP, collections", category: "programming" },
-  "Python":         { name: "Core Python",     slug: "core-python",     duration: "40 Days", fee: "₹5,000",  description: "Python programming from zero to projects", category: "programming" },
-  "PGJPL":          { name: "PGJPL",           slug: "pgjpl",           duration: "4 Months", fee: "₹12,000", description: "Complete Java developer — Core to Advanced + JDBC", category: "programming", popular: true },
-  "PGPPL":          { name: "PGPPL",           slug: "pgppl",           duration: "4 Months", fee: "₹12,000", description: "Complete Python developer — Core to Advanced", category: "programming", popular: true },
-  "Data Science":   { name: "Data Science",    slug: "data-science",    duration: "6 Months", fee: "₹25,000", description: "Data analysis, ML basics, Python & real projects", category: "data", popular: true },
-  "Java Fullstack": { name: "Java Fullstack",  slug: "java-full-stack", duration: "6 Months", fee: "₹25,000", description: "Complete Java web developer — Spring Boot", category: "programming", popular: true },
-  "Python Fullstack":{ name: "Python Fullstack",slug: "python-full-stack",duration: "6 Months", fee: "₹25,000", description: "Complete Python web developer — Django", category: "programming", popular: true },
-  "AWS":            { name: "AWS",             slug: "aws",             duration: "3 Months", fee: "₹15,000", description: "Amazon cloud computing — EC2, S3, deployment", category: "cloud" },
-  "Azure":          { name: "Azure",           slug: "azure",           duration: "3 Months", fee: "₹15,000", description: "Microsoft cloud — virtual machines & apps", category: "cloud" },
-  "Power BI":       { name: "Power BI",        slug: "power-bi",        duration: "20 Days", fee: "₹4,000",  description: "Data dashboards & business intelligence", category: "data" },
-  "HTML & CSS":     { name: "HTML & CSS",      slug: "html",            duration: "20 Days", fee: "₹2,000",  description: "Build beautiful websites from scratch", category: "web" },
-  "JavaScript":     { name: "JavaScript",      slug: "javascript",      duration: "20 Days", fee: "₹3,000",  description: "Make websites interactive & dynamic", category: "web" },
-  "Bootstrap":      { name: "Bootstrap",       slug: "bootstrap",       duration: "20 Days", fee: "₹2,000",  description: "Quick responsive websites with Bootstrap 5", category: "web" },
-  "ReactJS":        { name: "ReactJS",         slug: "reactjs",         duration: "30 Days", fee: "₹6,000",  description: "Modern web apps with React framework", category: "web", popular: true },
-  "ADWD":           { name: "A.D.W.D",         slug: "adwd",            duration: "3 Months", fee: "₹8,000",  description: "Full web design — HTML, CSS, JS, Bootstrap", category: "web" },
+interface BranchOption {
+  id: string
+  name: string
 }
 
-const categoryConfig = {
+/**
+ * Presentation only: which shelf a course sits on, and whether it carries the
+ * POPULAR flag. Nothing else.
+ *
+ * Name, duration and price all come from the `courses` table now. They used to
+ * come from a hardcoded map in this file, which put the browser in charge of what
+ * a course costs: the figure on the payment screen, the amount encoded in the UPI
+ * QR code, and the amount register_student() actually charges were three
+ * independent numbers, and they disagreed — the form quoted ₹3,500 for Tally
+ * Prime against the database's ₹5,000, and ₹5,000 for Core Java against ₹2,500.
+ * Five of the twenty entries also named slugs the database has never heard of
+ * (data-science, aws, azure, power-bi, reactjs), so a student who picked one was
+ * refused at submit with "no longer available" and no way to tell why.
+ *
+ * Keyed by slug on purpose: a course the database does not sell cannot be offered,
+ * and one it sells but this file has never heard of still appears, under
+ * "More Courses".
+ */
+const courseMeta: Record<string, { category: CourseCategory; popular?: boolean }> = {
+  dca: { category: "basic" },
+  adca: { category: "basic" },
+  pgdca: { category: "basic" },
+  "basic-computer": { category: "basic" },
+  "internet-concept": { category: "basic" },
+  "ms-office": { category: "basic" },
+  "tally-prime": { category: "basic" },
+  "c-language": { category: "programming" },
+  "core-java": { category: "programming" },
+  "advanced-java": { category: "programming" },
+  "core-python": { category: "programming" },
+  "oops-python": { category: "programming" },
+  pgjpl: { category: "programming", popular: true },
+  pgppl: { category: "programming", popular: true },
+  "java-full-stack": { category: "programming", popular: true },
+  "python-full-stack": { category: "programming", popular: true },
+  adwd: { category: "web" },
+  html: { category: "web" },
+  css: { category: "web" },
+  javascript: { category: "web" },
+  "angular-js": { category: "web" },
+  bootstrap: { category: "web" },
+  oracle: { category: "data" },
+  "advanced-excel": { category: "data" },
+}
+
+const categoryConfig: Record<CourseCategory, { icon: typeof Monitor; color: string; bg: string; label: string }> = {
   basic:       { icon: Monitor,  color: "text-blue-600 dark:text-blue-400",     bg: "bg-blue-50 dark:bg-blue-950/40",     label: "Computer Basics" },
   programming: { icon: Code,     color: "text-violet-600 dark:text-violet-400", bg: "bg-violet-50 dark:bg-violet-950/40",  label: "Programming" },
   web:         { icon: Globe,    color: "text-emerald-600 dark:text-emerald-400",bg: "bg-emerald-50 dark:bg-emerald-950/40",label: "Web Development" },
   data:        { icon: Database, color: "text-amber-600 dark:text-amber-400",   bg: "bg-amber-50 dark:bg-amber-950/40",    label: "Data & Analytics" },
   cloud:       { icon: Cloud,    color: "text-sky-600 dark:text-sky-400",       bg: "bg-sky-50 dark:bg-sky-950/40",        label: "Cloud Computing" },
+  other:       { icon: Layers,   color: "text-slate-600 dark:text-slate-400",   bg: "bg-slate-50 dark:bg-slate-950/40",    label: "More Courses" },
 }
 
 const statusOptions = [
@@ -132,12 +153,27 @@ const courseCardVariants: Variants = {
   }),
 }
 
-function getTotalFee(courses: string[]): number {
-  return courses.reduce((sum, c) => {
-    const info = courseInfo[c]
-    if (!info) return sum
-    return sum + parseInt(info.fee.replace(/[₹,]/g, ""))
-  }, 0)
+/** Formats a rupee amount the way the rest of the form does. */
+function inr(amount: number): string {
+  return `₹${amount.toLocaleString("en-IN")}`
+}
+
+const PASSWORD_MIN_LENGTH = 8
+
+/**
+ * Mirrors the rule in `/api/register` so the student is told what is wrong
+ * before submitting, instead of after a round trip to the server.
+ *
+ * Returns null when the password is acceptable, otherwise the message to show.
+ */
+function passwordProblem(password: string): string | null {
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`
+  }
+  if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+    return "Password must contain at least one letter and one number."
+  }
+  return null
 }
 
 export default function UserRegisterPage() {
@@ -146,6 +182,7 @@ export default function UserRegisterPage() {
   const [step, setStep] = useState(1)
   const [direction, setDirection] = useState(1)
   const [submitting, setSubmitting] = useState(false)
+  const [alreadyRegistered, setAlreadyRegistered] = useState(false)
 
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
@@ -155,78 +192,151 @@ export default function UserRegisterPage() {
 
   const [fatherName, setFatherName] = useState("")
   const [branch, setBranch] = useState("")
-  const [selectedCourses, setSelectedCourses] = useState<string[]>([])
+  const [selectedCourseSlugs, setSelectedCourseSlugs] = useState<string[]>([])
   const [presentStatus, setPresentStatus] = useState("")
   const [parentMobile, setParentMobile] = useState("")
   const [agreeTerms, setAgreeTerms] = useState(false)
   const [signature, setSignature] = useState("")
 
-  const [otpSent, setOtpSent] = useState(false)
-  const [otpCode, setOtpCode] = useState(["", "", "", "", "", ""])
-  const [otpVerifying, setOtpVerifying] = useState(false)
-  const [otpVerified, setOtpVerified] = useState(false)
-  const [otpError, setOtpError] = useState("")
-  const [sendingOtp, setSendingOtp] = useState(false)
-  const otpRefs = useRef<(HTMLInputElement | null)[]>([])
-
-  function handleEmailChange(value: string) {
-    setEmail(value)
-    if (step >= 2 && (otpVerified || otpSent)) {
-      setOtpVerified(false)
-      setOtpSent(false)
-      setOtpCode(["", "", "", "", "", ""])
-      setOtpError("")
-      toast("Email changed — please verify the new email", {
-        variant: "info",
-        action: {
-          label: "Send OTP",
-          onClick: () => {
-            setSendingOtp(true)
-            fetch("/api/send-otp", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email: value }),
-            }).then((res) => {
-              if (res.ok) {
-                setOtpSent(true)
-                toast("OTP sent to your email", { variant: "success" })
-                setTimeout(() => otpRefs.current[0]?.focus(), 100)
-              } else {
-                setOtpError("Failed to send OTP")
-              }
-            }).catch(() => {
-              setOtpError("Failed to send OTP")
-            }).finally(() => {
-              setSendingOtp(false)
-            })
-          },
-        },
-      })
-    }
-  }
-
   const [paymentDone, setPaymentDone] = useState(false)
   const [confirmingPayment, setConfirmingPayment] = useState(false)
   const [paymentReference, setPaymentReference] = useState("")
+  // Which of the three installments are being settled at registration. Defaults
+  // to the first only, matching what the form did before the schedule existed:
+  // it filed one payment for the whole course fee as though "Registration Fee"
+  // were a single charge.
+  const [paidInstallments, setPaidInstallments] = useState<number[]>([1])
+
+  const [courses, setCourses] = useState<CourseOption[]>([])
+  const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
+  const [catalogueLoading, setCatalogueLoading] = useState(true)
+  const [catalogueError, setCatalogueError] = useState<string | null>(null)
 
   const steps = [
     { id: 1, title: "Personal Info",     icon: User,      description: "Tell us about yourself" },
-    { id: 2, title: "Verify Email",       icon: Shield,    description: "OTP verification" },
-    { id: 3, title: "Choose Course",      icon: BookOpen,  description: "Select branch & course" },
-    { id: 4, title: "Payment",            icon: CreditCard, description: "UPI payment" },
-    { id: 5, title: "Final Details",      icon: FileText,  description: "Review & submit" },
+    { id: 2, title: "Choose Course",      icon: BookOpen,  description: "Select branch & course" },
+    { id: 3, title: "Payment",            icon: CreditCard, description: "UPI payment" },
+    { id: 4, title: "Final Details",      icon: FileText,  description: "Review & submit" },
   ]
 
   const totalSteps = steps.length
   const currentStepData = steps[step - 1]
   const progress = (step / totalSteps) * 100
 
+  const selectedCourses = courses.filter((c) => selectedCourseSlugs.includes(c.slug))
+  const selectedCourseNames = selectedCourses.map((c) => c.name).join(", ")
+  const totalFee = selectedCourses.reduce((sum, c) => sum + c.fee, 0)
+
+  const INSTALLMENT_COUNT = 3
+
+  /**
+   * Mirrors create_fee_schedule() in supabase.sql.
+   *
+   * The first rows take the floor of the fee divided by three and the last one
+   * absorbs the remainder, so the three always add back up to the course fee. The
+   * obvious alternative — Math.ceil for every row — makes the parts sum to more
+   * than the whole, which is the overshoot that used to be baked into the admin
+   * "Create Plan" dialog.
+   */
+  function installmentShare(n: number): number {
+    if (totalFee <= 0) return 0
+    const base = Math.floor(totalFee / INSTALLMENT_COUNT)
+    if (n === INSTALLMENT_COUNT) return totalFee - base * (INSTALLMENT_COUNT - 1)
+    return base
+  }
+
+  const payAllNow = paidInstallments.length === INSTALLMENT_COUNT
+  const amountToPay = paidInstallments.reduce((sum, n) => sum + installmentShare(n), 0)
+
+  function togglePaidInstallment(n: number) {
+    setPaidInstallments((prev) =>
+      prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n].sort((a, b) => a - b)
+    )
+  }
+
+  /**
+   * Loads the catalogue the student actually enrols in.
+   *
+   * `anon` may read courses and branches, so this needs no session. An error is
+   * surfaced rather than papered over with a fallback list: a hardcoded list is
+   * how five unselectable courses and three different prices for the same course
+   * got into this form in the first place. Offering a catalogue we cannot read is
+   * how a student ends up paying one number and being invoiced another.
+   */
+  useEffect(() => {
+    let active = true
+
+    async function loadCatalogue() {
+      const [coursesResult, branchesResult] = await Promise.all([
+        supabase
+          .from("courses")
+          .select("slug, name, duration, fee_numeric, description")
+          .eq("status", "active"),
+        // Primary branch first, then the rest alphabetically. Ordering on
+        // `is_primary` rather than on the literal id, so the list follows the
+        // flag in the database: marking a different branch primary in the admin
+        // portal moves it to the top without a deploy. Plain `.order("name")`
+        // put Amberpet first, which buried the main branch under two others.
+        supabase
+          .from("branches")
+          .select("id, name")
+          .order("is_primary", { ascending: false })
+          .order("name"),
+      ])
+
+      if (!active) return
+
+      const failures = [coursesResult.error, branchesResult.error].filter((e) => e !== null)
+      if (failures.length > 0) {
+        for (const failure of failures) {
+          console.error("[register] catalogue load failed:", failure.message)
+        }
+        setCatalogueError(
+          "We couldn't load the course list. Please refresh the page, or contact the institute if it keeps happening."
+        )
+        setCatalogueLoading(false)
+        return
+      }
+
+      const options: CourseOption[] = (coursesResult.data ?? []).map((row) => {
+        const meta = courseMeta[row.slug]
+        return {
+          slug: row.slug,
+          name: row.name,
+          duration: row.duration,
+          fee: Number(row.fee_numeric) || 0,
+          description: row.description,
+          category: meta?.category ?? "other",
+          popular: meta?.popular ?? false,
+        }
+      })
+
+      // A slug can be retired between the catalogue loading and the student
+      // submitting. Dropping the selection here is better than letting the server
+      // reject the whole enrolment for one stale course.
+      setCourses(options)
+      setSelectedCourseSlugs((prev) => prev.filter((slug) => options.some((c) => c.slug === slug)))
+      setBranchOptions((branchesResult.data ?? []) as BranchOption[])
+      setCatalogueLoading(false)
+    }
+
+    loadCatalogue().catch((err) => {
+      console.error("[register] catalogue load crashed:", err)
+      if (!active) return
+      setCatalogueError("We couldn't load the course list. Please refresh the page.")
+      setCatalogueLoading(false)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   function goNext() {
     if (step >= totalSteps) return
     if (step === 1 && (!fullName || !fatherName || !email || !phone)) return
-    if (step === 2 && !otpVerified) return
-    if (step === 3 && (!branch || selectedCourses.length === 0)) return
-    if (step === 4 && !paymentDone) return
+    if (step === 2 && (!branch || selectedCourseSlugs.length === 0)) return
+    if (step === 3 && !paymentDone) return
     setDirection(1)
     setStep((s) => s + 1)
   }
@@ -238,94 +348,10 @@ export default function UserRegisterPage() {
     }
   }
 
-  function toggleCourse(courseName: string) {
-    setSelectedCourses((prev) =>
-      prev.includes(courseName)
-        ? prev.filter((c) => c !== courseName)
-        : [...prev, courseName]
+  function toggleCourse(slug: string) {
+    setSelectedCourseSlugs((prev) =>
+      prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
     )
-  }
-
-  async function handleSendOtp() {
-    setSendingOtp(true)
-    setOtpError("")
-    try {
-      const res = await fetch("/api/send-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      })
-      if (res.ok) {
-        setOtpSent(true)
-        toast("OTP sent to your email", { variant: "success" })
-        setTimeout(() => otpRefs.current[0]?.focus(), 100)
-      } else {
-        const data = await res.json()
-        setOtpError(data.error || "Failed to send OTP")
-      }
-    } catch {
-      setOtpError("Failed to send OTP. Please try again.")
-    } finally {
-      setSendingOtp(false)
-    }
-  }
-
-  async function verifyOtpCode(code: string) {
-    setOtpVerifying(true)
-    setOtpError("")
-    try {
-      const res = await fetch("/api/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code }),
-      })
-      if (res.ok) {
-        setOtpVerified(true)
-        toast("Email verified successfully!", { variant: "success" })
-      } else {
-        const data = await res.json()
-        setOtpError(data.error || "Invalid OTP")
-        setOtpCode(["", "", "", "", "", ""])
-        otpRefs.current[0]?.focus()
-      }
-    } catch {
-      setOtpError("Verification failed. Please try again.")
-    } finally {
-      setOtpVerifying(false)
-    }
-  }
-
-  const handleOtpChange = useCallback((index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return
-    const newOtp = [...otpCode]
-    newOtp[index] = value.slice(-1)
-    setOtpCode(newOtp)
-    setOtpError("")
-
-    if (value && index < 5) {
-      otpRefs.current[index + 1]?.focus()
-    }
-
-    if (newOtp.every((d) => d.length === 1)) {
-      verifyOtpCode(newOtp.join(""))
-    }
-  }, [otpCode])
-
-  function handleOtpKeyDown(index: number, e: React.KeyboardEvent) {
-    if (e.key === "Backspace" && !otpCode[index] && index > 0) {
-      otpRefs.current[index - 1]?.focus()
-    }
-  }
-
-  function handleOtpPaste(e: React.ClipboardEvent) {
-    e.preventDefault()
-    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6)
-    if (pasted.length === 6) {
-      const newOtp = pasted.split("")
-      setOtpCode(newOtp)
-      otpRefs.current[5]?.focus()
-      verifyOtpCode(pasted)
-    }
   }
 
   async function handlePaymentConfirm() {
@@ -338,6 +364,16 @@ export default function UserRegisterPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
+    if (catalogueError) {
+      toast(catalogueError, { variant: "destructive" })
+      return
+    }
+
+    if (passwordIssue) {
+      toast(passwordIssue, { variant: "destructive" })
+      return
+    }
+
     if (password !== confirmPassword) {
       toast("Passwords do not match", { variant: "destructive" })
       return
@@ -345,11 +381,6 @@ export default function UserRegisterPage() {
 
     if (!agreeTerms) {
       toast("Please agree to the terms", { variant: "destructive" })
-      return
-    }
-
-    if (!otpVerified) {
-      toast("Please verify your email first", { variant: "destructive" })
       return
     }
 
@@ -368,134 +399,166 @@ export default function UserRegisterPage() {
       return
     }
 
+    // A course with no fee published yet cannot be paid at registration, and
+    // claiming a payment for it would file a claim against a zero-amount
+    // installment for an admin to reconcile.
+    if (totalFee <= 0 && paidInstallments.length > 0) {
+      setPaidInstallments([])
+    }
+
+    if (totalFee > 0 && paidInstallments.length === 0) {
+      toast("Choose which installment you are paying, or select all of them", {
+        variant: "destructive",
+      })
+      return
+    }
+
     setSubmitting(true)
 
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: fullName, phone, present_status: presentStatus },
-      },
-    })
+    try {
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: fullName.trim(),
+          email: email.trim(),
+          phone,
+          password,
+          fatherName: fatherName.trim(),
+          fatherPhone: parentMobile,
+          branchId: branch,
+          courseSlugs: selectedCourseSlugs,
+          presentStatus,
+          signature: signature.trim(),
+          paymentReference: paymentReference.trim(),
+          paidInstallments,
+        }),
+      })
 
-    if (authError) {
-      toast("Registration failed: " + authError.message, { variant: "destructive" })
-      setSubmitting(false)
-      return
-    }
+      const data = await res.json().catch(() => ({}))
 
-    const userId = authData.user?.id
-    if (!userId) {
-      toast("Registration failed: no user ID", { variant: "destructive" })
-      setSubmitting(false)
-      return
-    }
+      if (!res.ok) {
+        if (res.status === 409) {
+          setAlreadyRegistered(true)
+          toast(data.error || "An account with this email already exists.", {
+            variant: "warning",
+            description: "Sign in instead, or reset your password if you've forgotten it.",
+          })
+          return
+        }
 
-    const { count } = await supabase
-      .from("students")
-      .select("id", { count: "exact", head: true })
+        if (res.status === 429) {
+          toast(data.error || "Too many attempts. Please wait and try again.", {
+            variant: "destructive",
+          })
+          return
+        }
 
-    const year = new Date().getFullYear()
-    const studentId = `STU-${year}-${String((count ?? 0) + 1).padStart(3, "0")}`
-    const courseSlugs = selectedCourses
-      .map((c) => courseInfo[c]?.slug)
-      .filter((s): s is string => Boolean(s))
-    const primaryCourse = courseSlugs[0]
-
-    const { error: studentError } = await supabase.from("students").insert({
-      id: studentId,
-      user_id: userId,
-      full_name: fullName,
-      email,
-      phone,
-      father_name: fatherName,
-      father_phone: parentMobile || null,
-      branch_id: branch || null,
-      course_slug: primaryCourse,
-      status: "Active",
-      present_status: presentStatus,
-      full_name_as_signature: signature,
-    })
-
-    if (studentError) {
-      toast("Failed to create student record: " + studentError.message, { variant: "destructive" })
-      setSubmitting(false)
-      return
-    }
-
-    const feeNumeric = getTotalFee(selectedCourses)
-    const today = new Date().toISOString().split("T")[0]
-
-    // Create a fee record + installment for every selected course
-    for (const slug of courseSlugs) {
-      const courseFee = getTotalFee(selectedCourses.filter((c) => courseInfo[c]?.slug === slug))
-      const { data: feeRow, error: feeError } = await supabase
-        .from("fees")
-        .insert({
-          student_id: studentId,
-          course_slug: slug,
-          total_fee: courseFee,
-          paid_amount: 0,
-          pending_amount: courseFee,
+        toast(data.error || "We couldn't complete your registration.", {
+          variant: "destructive",
         })
-        .select("id")
-        .single()
-
-      if (!feeError && feeRow) {
-        await supabase.from("fee_installments").insert({
-          fee_id: feeRow.id,
-          label: "Registration Fee",
-          amount: courseFee,
-          due_date: today,
-          status: "Pending",
-        })
+        return
       }
+
+      // The account now exists and is confirmed, so this sign-in cannot fail on
+      // a confirmation prompt. If it somehow does, the student record is already
+      // waiting and they only need to retry.
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+
+      if (signInError) {
+        console.error("[register] sign-in after signup failed:", signInError.message)
+        toast("Your account was created.", {
+          variant: "warning",
+          description: "We couldn't sign you in automatically. Please sign in with your new password.",
+        })
+        router.replace(`/auth/user/login?email=${encodeURIComponent(email.trim())}`)
+        return
+      }
+
+      toast("Account created successfully!", {
+        variant: "success",
+        description: "Welcome to TNGC. Your student ID is " + (data.studentId ?? "on the way"),
+      })
+      router.replace("/student/dashboard")
+      router.refresh()
+    } catch (err) {
+      console.error("[register] submission crashed:", err)
+      const info = describeAuthError(err)
+      toast(info.message, { variant: "destructive" })
+    } finally {
+      setSubmitting(false)
     }
-
-    // Record the payment as pending (admin verifies before marking Paid)
-    const paymentId = `PAY-${year}-${String((count ?? 0) + 1).padStart(4, "0")}`
-    const { error: payError } = await supabase.from("payments").insert({
-      id: paymentId,
-      student_id: studentId,
-      student_name: fullName,
-      course_slug: primaryCourse,
-      amount: feeNumeric,
-      payment_date: today,
-      method: "upi",
-      status: "Pending",
-      description: paymentReference
-        ? `UPI Reference: ${paymentReference}`
-        : "Registration fee via UPI",
-    })
-
-    if (payError) {
-      console.warn("Payment record could not be created:", payError.message)
-    }
-
-    toast("Account created successfully! Please sign in.", { variant: "success" })
-    router.push("/auth/user/login")
-    setSubmitting(false)
   }
 
-  const totalFee = getTotalFee(selectedCourses)
-  const upiUri = `upi://pay?pa=${process.env.NEXT_PUBLIC_UPI_ID || "tngc@upi"}&pn=${encodeURIComponent(process.env.NEXT_PUBLIC_UPI_NAME || "TNGC Computers")}&am=${totalFee}&cu=INR`
+  const passwordIssue = password ? passwordProblem(password) : null
+
+  if (alreadyRegistered) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/30 px-4 py-8">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+          <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-amber-500/10">
+            <AlertTriangle className="size-7 text-amber-600 dark:text-amber-400" />
+          </div>
+          <h1 className="text-xl font-bold text-foreground">You&apos;re already registered</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            An account already exists for{" "}
+            <span className="font-semibold text-foreground">{email.trim()}</span>. Sign in to continue, or
+            reset your password if you&apos;ve forgotten it.
+          </p>
+
+          <div className="mt-6 space-y-2">
+            <Link href={`/auth/user/login?email=${encodeURIComponent(email.trim())}`} className="block">
+              <Button className="h-10 w-full gap-2">
+                <LogIn className="size-4" />
+                Sign in instead
+              </Button>
+            </Link>
+            <Link
+              href={`/auth/user/reset-password?email=${encodeURIComponent(email.trim())}`}
+              className="block"
+            >
+              <Button variant="outline" className="h-10 w-full">
+                Reset password
+              </Button>
+            </Link>
+            <Button
+              variant="ghost"
+              className="h-10 w-full"
+              onClick={() => {
+                setAlreadyRegistered(false)
+                setStep(1)
+                setDirection(-1)
+              }}
+            >
+              Use a different email
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/30 px-4 py-8">
       <div className="w-full max-w-4xl">
-        <div className="mb-6 text-center lg:mb-4">
-          <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl bg-primary/10 lg:size-14">
-            <GraduationCap className="size-6 text-primary lg:size-7" />
-          </div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-foreground lg:text-3xl">
-            Create Your Account
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Join TNGC and start your learning journey
-          </p>
-        </div>
-
         <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm ring-1 ring-foreground/5">
+          <div className="flex items-center gap-3 border-b border-border bg-muted/20 px-4 py-3 lg:px-6">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+              <GraduationCap className="size-5 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-base font-bold leading-tight tracking-tight text-foreground">
+                Create Your Account
+              </h1>
+              <p className="text-xs leading-snug text-muted-foreground">
+                Join TNGC and start your learning journey
+              </p>
+            </div>
+          </div>
+
           <div className="flex flex-col lg:flex-row">
             <div className="hidden w-72 border-r border-border bg-muted/30 p-6 lg:flex lg:flex-col">
               <div className="flex-1 space-y-1">
@@ -609,7 +672,7 @@ export default function UserRegisterPage() {
                                 <Label htmlFor="email">Email Address *</Label>
                                 <div className="relative">
                                   <Mail className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                                  <Input id="email" type="email" placeholder="you@example.com" className="h-10 pl-10" value={email} onChange={(e) => handleEmailChange(e.target.value)} required />
+                                  <Input id="email" type="email" placeholder="you@example.com" className="h-10 pl-10" value={email} onChange={(e) => setEmail(e.target.value)} required />
                                 </div>
                               </div>
                               <div className="space-y-2">
@@ -626,210 +689,124 @@ export default function UserRegisterPage() {
                         {step === 2 && (
                           <>
                             <div className="mb-4">
-                              <h2 className="text-lg font-bold text-foreground">Verify Your Email</h2>
-                              <p className="text-sm text-muted-foreground">We&apos;ll send a 6-digit code to <span className="font-semibold text-foreground">{email}</span></p>
+                              <h2 className="text-lg font-bold text-foreground">Choose Your Course</h2>
+                              <p className="text-sm text-muted-foreground">Select your branch and courses</p>
                             </div>
 
-                            {otpVerified ? (
-                              <div className="flex flex-col items-center py-8">
-                                <div className="flex size-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950/40">
-                                  <CheckCircle2 className="size-8 text-emerald-600 dark:text-emerald-400" />
-                                </div>
-                                <p className="mt-4 text-lg font-bold text-foreground">Email Verified!</p>
-                                <p className="mt-1 text-sm text-muted-foreground">Your email has been successfully verified.</p>
+                            {catalogueError ? (
+                              <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                                {catalogueError}
+                              </div>
+                            ) : catalogueLoading ? (
+                              <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                                <Loader2 className="size-4 animate-spin" />
+                                Loading courses...
                               </div>
                             ) : (
-                              <div className="space-y-4">
-                                {!otpSent ? (
-                                  <div className="flex flex-col items-center py-6">
-                                    <div className="flex size-16 items-center justify-center rounded-full bg-primary/10">
-                                      <Shield className="size-8 text-primary" />
-                                    </div>
-                                    <p className="mt-4 text-sm text-muted-foreground text-center">
-                                      Click the button below to send a verification code to your email address.
-                                    </p>
-                                    <Button
-                                      type="button"
-                                      onClick={handleSendOtp}
-                                      className="mt-4 gap-2"
-                                      disabled={sendingOtp}
-                                    >
-                                      {sendingOtp ? (
-                                        <Loader2 className="size-4 animate-spin" />
-                                      ) : (
-                                        <Mail className="size-4" />
-                                      )}
-                                      {sendingOtp ? "Sending OTP..." : "Send Verification Code"}
-                                    </Button>
+                              <>
+                                <div className="space-y-2">
+                                  <Label>Preferred Branch *</Label>
+                                  <div className="relative">
+                                    <MapPin className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground z-10" />
+                                    <Select value={branch} onValueChange={(v) => setBranch(v ?? "")}>
+                                      <SelectTrigger className="pl-10">
+                                        <SelectValue placeholder="Select your nearest branch" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {branchOptions.map((b) => (
+                                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
                                   </div>
-                                ) : (
-                                  <div className="space-y-4">
-                                    <p className="text-center text-sm text-muted-foreground">
-                                      Enter the 6-digit code sent to <span className="font-semibold text-foreground">{email}</span>
-                                    </p>
+                                </div>
 
-                                    <div className="flex justify-center gap-1.5 sm:gap-2">
-                                      {otpCode.map((digit, i) => (
-                                        <input
-                                          key={i}
-                                          ref={(el) => { otpRefs.current[i] = el }}
-                                          type="text"
-                                          inputMode="numeric"
-                                          maxLength={1}
-                                          value={digit}
-                                          onChange={(e) => handleOtpChange(i, e.target.value)}
-                                          onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                                          onPaste={handleOtpPaste}
-                                          className={cn(
-                                            "size-10 text-center text-lg font-bold rounded-xl border-2 transition-all sm:size-12",
-                                            "bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30",
-                                            digit ? "border-primary" : "border-border",
-                                            otpError && "border-red-500"
-                                          )}
-                                          disabled={otpVerifying}
-                                        />
-                                      ))}
-                                    </div>
+                                <div className="space-y-4">
+                                  {(Object.keys(categoryConfig) as CourseCategory[]).map((catKey) => {
+                                    const cat = categoryConfig[catKey]
+                                    const catCourses = courses.filter((c) => c.category === catKey)
+                                    if (catCourses.length === 0) return null
+                                    const CatIcon = cat.icon
 
-                                    {otpVerifying && (
-                                      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                                        <Loader2 className="size-4 animate-spin" />
-                                        Verifying...
+                                    return (
+                                      <div key={catKey}>
+                                        <div className={cn("mb-2 flex items-center gap-2 rounded-lg px-3 py-1.5", cat.bg)}>
+                                          <CatIcon className={cn("size-3.5", cat.color)} />
+                                          <span className={cn("text-xs font-semibold", cat.color)}>{cat.label}</span>
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                          {catCourses.map((course, idx) => {
+                                            const selected = selectedCourseSlugs.includes(course.slug)
+                                            const CourseIcon = cat.icon
+                                            return (
+                                              <motion.button
+                                                key={course.slug}
+                                                type="button"
+                                                custom={idx}
+                                                variants={courseCardVariants}
+                                                initial="hidden"
+                                                animate="visible"
+                                                whileTap={{ scale: 0.97 }}
+                                                whileHover={{ scale: 1.01 }}
+                                                onClick={() => toggleCourse(course.slug)}
+                                                aria-pressed={selected}
+                                                className={cn(
+                                                  "group relative flex items-start gap-2.5 rounded-xl border-2 p-3 text-left transition-all",
+                                                  selected
+                                                    ? "border-primary bg-primary/5 shadow-sm"
+                                                    : "border-border bg-background hover:border-primary/30"
+                                                )}
+                                              >
+                                                <div className={cn(
+                                                  "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors",
+                                                  selected ? "bg-primary text-primary-foreground" : cat.bg
+                                                )}>
+                                                  {selected ? <Check className="size-4" /> : <CourseIcon className={cn("size-4", cat.color)} />}
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                  <div className="flex items-center gap-1.5">
+                                                    <span className={cn("text-sm font-bold", selected ? "text-primary" : "text-foreground")}>
+                                                      {course.name}
+                                                    </span>
+                                                    {course.popular && (
+                                                      <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">POPULAR</span>
+                                                    )}
+                                                  </div>
+                                                  <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{course.description}</p>
+                                                  <div className="mt-1.5 flex items-center gap-2.5">
+                                                    <span className="flex items-center gap-0.5 text-[11px] font-medium text-muted-foreground">
+                                                      <Clock className="size-2.5" />{course.duration}
+                                                    </span>
+                                                    <span className="flex items-center gap-0.5 text-[11px] font-bold text-primary">
+                                                      <IndianRupee className="size-2.5" />{course.fee.toLocaleString("en-IN")}
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                              </motion.button>
+                                            )
+                                          })}
+                                        </div>
                                       </div>
-                                    )}
+                                    )
+                                  })}
+                                </div>
 
-                                    {otpError && (
-                                      <p className="text-center text-sm text-red-500">{otpError}</p>
-                                    )}
-
-                                    <div className="flex justify-center">
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={handleSendOtp}
-                                        disabled={sendingOtp}
-                                        className="gap-1.5 text-xs"
-                                      >
-                                        <RefreshCw className="size-3" />
-                                        Resend OTP
-                                      </Button>
-                                    </div>
+                                {selectedCourses.length > 0 && (
+                                  <div className="rounded-xl bg-primary/5 p-3 text-center">
+                                    <p className="text-xs text-muted-foreground">
+                                      Selected: <span className="font-semibold text-primary">{selectedCourseNames}</span>
+                                    </p>
+                                    <p className="mt-1 text-sm font-bold text-foreground">
+                                      Total Fee: {inr(totalFee)}
+                                    </p>
                                   </div>
                                 )}
-                              </div>
+                              </>
                             )}
                           </>
                         )}
 
                         {step === 3 && (
-                          <>
-                            <div className="mb-4">
-                              <h2 className="text-lg font-bold text-foreground">Choose Your Course</h2>
-                              <p className="text-sm text-muted-foreground">Select your branch and courses</p>
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label>Preferred Branch *</Label>
-                              <div className="relative">
-                                <MapPin className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground z-10" />
-                                <Select value={branch} onValueChange={(v) => setBranch(v ?? "")}>
-                                  <SelectTrigger className="pl-10">
-                                    <SelectValue placeholder="Select your nearest branch" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {branches.map((b) => (
-                                      <SelectItem key={b.value} value={b.value}>{b.label}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-
-                            <div className="space-y-4">
-                              {(Object.keys(categoryConfig) as Array<keyof typeof categoryConfig>).map((catKey) => {
-                                const cat = categoryConfig[catKey]
-                                const catCourses = courseNames.filter((c) => courseInfo[c].category === catKey)
-                                if (catCourses.length === 0) return null
-                                const CatIcon = cat.icon
-
-                                return (
-                                  <div key={catKey}>
-                                    <div className={cn("mb-2 flex items-center gap-2 rounded-lg px-3 py-1.5", cat.bg)}>
-                                      <CatIcon className={cn("size-3.5", cat.color)} />
-                                      <span className={cn("text-xs font-semibold", cat.color)}>{cat.label}</span>
-                                    </div>
-                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                      {catCourses.map((courseKey, idx) => {
-                                        const course = courseInfo[courseKey]
-                                        const selected = selectedCourses.includes(courseKey)
-                                        const CourseIcon = cat.icon
-                                        return (
-                                          <motion.button
-                                            key={courseKey}
-                                            type="button"
-                                            custom={idx}
-                                            variants={courseCardVariants}
-                                            initial="hidden"
-                                            animate="visible"
-                                            whileTap={{ scale: 0.97 }}
-                                            whileHover={{ scale: 1.01 }}
-                                            onClick={() => toggleCourse(courseKey)}
-                                            className={cn(
-                                              "group relative flex items-start gap-2.5 rounded-xl border-2 p-3 text-left transition-all",
-                                              selected
-                                                ? "border-primary bg-primary/5 shadow-sm"
-                                                : "border-border bg-background hover:border-primary/30"
-                                            )}
-                                          >
-                                            <div className={cn(
-                                              "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors",
-                                              selected ? "bg-primary text-primary-foreground" : cat.bg
-                                            )}>
-                                              {selected ? <Check className="size-4" /> : <CourseIcon className={cn("size-4", cat.color)} />}
-                                            </div>
-                                            <div className="min-w-0 flex-1">
-                                              <div className="flex items-center gap-1.5">
-                                                <span className={cn("text-sm font-bold", selected ? "text-primary" : "text-foreground")}>
-                                                  {course.name}
-                                                </span>
-                                                {course.popular && (
-                                                  <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">POPULAR</span>
-                                                )}
-                                              </div>
-                                              <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{course.description}</p>
-                                              <div className="mt-1.5 flex items-center gap-2.5">
-                                                <span className="flex items-center gap-0.5 text-[11px] font-medium text-muted-foreground">
-                                                  <Clock className="size-2.5" />{course.duration}
-                                                </span>
-                                                <span className="flex items-center gap-0.5 text-[11px] font-bold text-primary">
-                                                  <IndianRupee className="size-2.5" />{course.fee.replace("₹", "")}
-                                                </span>
-                                              </div>
-                                            </div>
-                                          </motion.button>
-                                        )
-                                      })}
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
-
-                            {selectedCourses.length > 0 && (
-                              <div className="rounded-xl bg-primary/5 p-3 text-center">
-                                <p className="text-xs text-muted-foreground">
-                                  Selected: <span className="font-semibold text-primary">{selectedCourses.join(", ")}</span>
-                                </p>
-                                <p className="mt-1 text-sm font-bold text-foreground">
-                                  Total Fee: ₹{totalFee.toLocaleString("en-IN")}
-                                </p>
-                              </div>
-                            )}
-                          </>
-                        )}
-
-                        {step === 4 && (
                           <>
                             <div className="mb-4">
                               <h2 className="text-lg font-bold text-foreground">Complete Payment</h2>
@@ -840,7 +817,7 @@ export default function UserRegisterPage() {
                               <div className="rounded-xl border border-border bg-muted/30 p-4">
                                 <div className="flex items-center justify-between mb-3">
                                   <span className="text-sm font-medium text-muted-foreground">Course(s)</span>
-                                  <span className="text-sm font-semibold text-foreground text-right">{selectedCourses.join(", ")}</span>
+                                  <span className="text-sm font-semibold text-foreground text-right">{selectedCourseNames}</span>
                                 </div>
                                 <div className="flex items-center justify-between border-t border-border pt-3">
                                   <span className="text-sm font-medium text-muted-foreground">Total Fee</span>
@@ -848,38 +825,125 @@ export default function UserRegisterPage() {
                                 </div>
                               </div>
 
-                              <div className="flex flex-col items-center rounded-xl border border-border bg-background p-6">
-                                <QRCodeSVG
-                                  value={upiUri}
-                                  size={200}
-                                  bgColor="transparent"
-                                  fgColor="currentColor"
-                                  level="M"
-                                  includeMargin
-                                  className="text-foreground"
-                                />
-                                <p className="mt-3 text-xs text-muted-foreground">Scan with any UPI app</p>
-                                <p className="mt-1 text-sm font-bold text-foreground">{process.env.NEXT_PUBLIC_UPI_ID || "tngc@upi"}</p>
-                              </div>
-
-                              <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground text-center space-y-1">
-                                <p>Pay <span className="font-bold text-foreground">₹{totalFee.toLocaleString("en-IN")}</span> to the UPI ID above</p>
-                                <p>After payment, click the button below to confirm</p>
-                              </div>
-
-                              <div className="space-y-2">
-                                <Label htmlFor="paymentReference">UPI Transaction Reference (optional)</Label>
-                                <div className="relative">
-                                  <Hash className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                                  <Input
-                                    id="paymentReference"
-                                    placeholder="e.g. UPI/UTR reference number"
-                                    className="h-10 pl-10"
-                                    value={paymentReference}
-                                    onChange={(e) => setPaymentReference(e.target.value)}
-                                  />
+                              {/* Which part of the fee is being paid now. The course
+                                  is split into three installments, and a student may
+                                  settle up to three at once — or the whole balance,
+                                  which is the same thing on a three-part course but
+                                  matters once an admin has extended the schedule. */}
+                              <div className="rounded-xl border border-border p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <Label>What are you paying now?</Label>
+                                  {totalFee > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setPaidInstallments(payAllNow ? [] : [1, 2, 3])}
+                                      className="text-xs font-medium text-primary hover:underline"
+                                    >
+                                      {payAllNow ? "Clear selection" : "Pay everything"}
+                                    </button>
+                                  )}
                                 </div>
+
+                                {totalFee <= 0 && (
+                                  <p className="text-sm text-muted-foreground">
+                                    No fee is set for the selected course yet, so there is
+                                    nothing to pay now. You can settle it from your fee page
+                                    once the institute publishes the amount.
+                                  </p>
+                                )}
+
+                                {totalFee > 0 && (
+                                  <>
+                                    <div className="space-y-2">
+                                      {[1, 2, 3].map((n) => {
+                                        const share = installmentShare(n)
+                                        const checked = paidInstallments.includes(n)
+                                        return (
+                                          <label
+                                            key={n}
+                                            className={`flex items-center justify-between rounded-lg border p-3 transition-colors ${
+                                              checked
+                                                ? "border-primary bg-primary/5"
+                                                : "cursor-pointer border-border hover:bg-muted/50"
+                                            }`}
+                                          >
+                                            <div className="flex items-center gap-3">
+                                              <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={() => togglePaidInstallment(n)}
+                                                className="size-4 accent-primary"
+                                              />
+                                              <span className="text-sm font-medium">
+                                                Installment {n}
+                                                {n === 3 && totalFee > 0 && (
+                                                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                                                    (final, adjusted)
+                                                  </span>
+                                                )}
+                                              </span>
+                                            </div>
+                                            <span className="text-sm font-semibold">
+                                              {inr(share)}
+                                            </span>
+                                          </label>
+                                        )
+                                      })}
+                                    </div>
+
+                                    <p className="mt-3 text-xs text-muted-foreground">
+                                      {paidInstallments.length === 0
+                                        ? "Select at least one installment, or pay the whole fee now."
+                                        : `Paying ${inr(amountToPay)} of ${inr(totalFee)} now. The rest stays on your schedule.`}
+                                    </p>
+                                  </>
+                                )}
                               </div>
+
+                              {totalFee > 0 && amountToPay > 0 && (
+                                <>
+                                  <div className="flex flex-col items-center rounded-xl border border-border bg-background p-6">
+                                    <QRCodeSVG
+                                      value={buildUpiUri(amountToPay)}
+                                      size={200}
+                                      bgColor="transparent"
+                                      fgColor="currentColor"
+                                      level="M"
+                                      includeMargin
+                                      className="text-foreground"
+                                    />
+                                    <p className="mt-3 text-xs text-muted-foreground">Scan with any UPI app</p>
+                                    <p className="mt-1 text-sm font-bold text-foreground">{UPI_CONTACT_NUMBER}</p>
+                                  </div>
+
+                                  <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground text-center space-y-1">
+                                    <p>
+                                      Pay{" "}
+                                      <span className="font-bold text-foreground">
+                                        ₹{amountToPay.toLocaleString("en-IN")}
+                                      </span>{" "}
+                                      to the UPI ID above
+                                    </p>
+                                    <p>After payment, click the button below to confirm</p>
+                                  </div>
+                                </>
+                              )}
+
+                              {totalFee > 0 && (
+                                <div className="space-y-2">
+                                  <Label htmlFor="paymentReference">UPI Transaction Reference (optional)</Label>
+                                  <div className="relative">
+                                    <Hash className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                                    <Input
+                                      id="paymentReference"
+                                      placeholder="Enter the transaction ID"
+                                      className="h-10 pl-10"
+                                      value={paymentReference}
+                                      onChange={(e) => setPaymentReference(e.target.value)}
+                                    />
+                                  </div>
+                                </div>
+                              )}
 
                               <div className="flex justify-center">
                                 {paymentDone ? (
@@ -907,7 +971,7 @@ export default function UserRegisterPage() {
                           </>
                         )}
 
-                        {step === 5 && (
+                        {step === 4 && (
                           <>
                             <div className="mb-4">
                               <h2 className="text-lg font-bold text-foreground">Final Details</h2>
@@ -926,7 +990,7 @@ export default function UserRegisterPage() {
                                 </div>
                                 <div>
                                   <span className="text-muted-foreground">Course:</span>
-                                  <p className="font-semibold text-foreground break-words">{selectedCourses.join(", ")}</p>
+                                  <p className="font-semibold text-foreground break-words">{selectedCourseNames}</p>
                                 </div>
                                 <div>
                                   <span className="text-muted-foreground">Fee to Pay:</span>
@@ -937,7 +1001,7 @@ export default function UserRegisterPage() {
 
                             <div className="space-y-2">
                               <Label>Present Status *</Label>
-                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                                 {statusOptions.map((opt) => {
                                   const Icon = opt.icon
                                   const selected = presentStatus === opt.value
@@ -946,15 +1010,16 @@ export default function UserRegisterPage() {
                                       key={opt.value}
                                       type="button"
                                       onClick={() => setPresentStatus(opt.value)}
+                                      aria-pressed={selected}
                                       className={cn(
-                                        "flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors",
+                                        "flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors",
                                         selected
                                           ? "border-primary bg-primary/10 text-primary"
                                           : "border-border bg-background text-foreground hover:border-primary/40"
                                       )}
                                     >
                                       <Icon className="size-4 shrink-0" />
-                                      {opt.value}
+                                      <span className="truncate">{opt.value}</span>
                                     </button>
                                   )
                                 })}
@@ -974,8 +1039,32 @@ export default function UserRegisterPage() {
                                 <Label htmlFor="password">Password *</Label>
                                 <div className="relative">
                                   <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                                  <Input id="password" type="password" placeholder="Create a password" className="h-10 pl-10" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                                  <Input
+                                    id="password"
+                                    type="password"
+                                    autoComplete="new-password"
+                                    placeholder="Create a password"
+                                    aria-describedby="password-requirements"
+                                    aria-invalid={Boolean(passwordIssue)}
+                                    className={cn(
+                                      "h-10 pl-10",
+                                      passwordIssue
+                                        ? "border-red-500 focus-visible:border-red-500 focus-visible:ring-red-500/20"
+                                        : password
+                                          ? "border-emerald-500 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
+                                          : ""
+                                    )}
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    required
+                                  />
                                 </div>
+                                <p id="password-requirements" className="text-xs text-muted-foreground">
+                                  Minimum {PASSWORD_MIN_LENGTH} characters, including a letter and a number.
+                                </p>
+                                {passwordIssue && (
+                                  <p className="text-xs text-red-500">{passwordIssue}</p>
+                                )}
                               </div>
                               <div className="space-y-2">
                                 <Label htmlFor="confirmPassword">Confirm Password *</Label>
@@ -984,6 +1073,7 @@ export default function UserRegisterPage() {
                                   <Input
                                     id="confirmPassword"
                                     type="password"
+                                    autoComplete="new-password"
                                     placeholder="Re-enter password"
                                     className={cn(
                                       "h-10 pl-10",
@@ -1001,7 +1091,7 @@ export default function UserRegisterPage() {
                                 {confirmPassword && confirmPassword !== password && (
                                   <p className="text-xs text-red-500">Passwords do not match</p>
                                 )}
-                                {confirmPassword && confirmPassword === password && (
+                                {confirmPassword && confirmPassword === password && !passwordIssue && (
                                   <p className="text-xs text-emerald-500">Passwords match</p>
                                 )}
                               </div>
@@ -1017,9 +1107,15 @@ export default function UserRegisterPage() {
                               <input id="agree" type="checkbox" checked={agreeTerms} onChange={(e) => setAgreeTerms(e.target.checked)} className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary" />
                               <Label htmlFor="agree" className="text-sm font-normal leading-snug text-muted-foreground">
                                 I agree to the above declaration and{" "}
-                                <Link href="/terms" className="text-primary hover:underline whitespace-nowrap">Terms of Service</Link>
+                                <Link href="/terms" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 whitespace-nowrap text-primary hover:underline">
+                                  Terms of Service
+                                  <ArrowUpRight className="size-3" />
+                                </Link>
                                 {" "}and{" "}
-                                <Link href="/privacy" className="text-primary hover:underline whitespace-nowrap">Privacy Policy</Link>
+                                <Link href="/privacy" target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 whitespace-nowrap text-primary hover:underline">
+                                  Privacy Policy
+                                  <ArrowUpRight className="size-3" />
+                                </Link>
                               </Label>
                             </div>
 
@@ -1048,9 +1144,12 @@ export default function UserRegisterPage() {
                         className="gap-1.5 px-6"
                         disabled={
                           (step === 1 && (!fullName || !fatherName || !email || !phone)) ||
-                          (step === 2 && !otpVerified) ||
-                          (step === 3 && (!branch || selectedCourses.length === 0)) ||
-                          (step === 4 && !paymentDone)
+                          (step === 2 &&
+                            (catalogueLoading ||
+                              catalogueError !== null ||
+                              !branch ||
+                              selectedCourseSlugs.length === 0)) ||
+                          (step === 3 && !paymentDone)
                         }
                       >
                         Continue <ArrowRight className="size-4" />
@@ -1061,9 +1160,12 @@ export default function UserRegisterPage() {
                         className="gap-1.5 px-6"
                         disabled={
                           submitting ||
+                          catalogueError !== null ||
+                          !branch ||
+                          selectedCourseSlugs.length === 0 ||
                           !presentStatus ||
                           !parentMobile || parentMobile.length !== 10 ||
-                          !password || password !== confirmPassword ||
+                          !password || Boolean(passwordIssue) || password !== confirmPassword ||
                           !agreeTerms || !signature
                         }
                       >

@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Code2, ArrowRight, Sparkles, Rocket, ExternalLink } from "lucide-react"
+import { Code2, ArrowRight, Sparkles, Rocket } from "lucide-react"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 

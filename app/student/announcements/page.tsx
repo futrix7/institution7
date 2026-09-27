@@ -5,6 +5,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Megaphone, Pin, Calendar, User, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { announcementTargetsFor } from "@/lib/announcement-scope"
+import { EmptyState, QueryError } from "@/components/student/data-state"
 
 interface Announcement {
   id: string
@@ -31,33 +33,81 @@ function formatDate(dateStr: string) {
 export default function StudentAnnouncements() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     async function fetchAnnouncements() {
-      const { data, error } = await supabase
+      setLoadError(null)
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setLoadError("Please sign in again to see announcements.")
+        setLoading(false)
+        return
+      }
+
+      // Who this student is decides which notices they get: the target audience
+      // and, below, the date they joined. Both are read up front so the server
+      // does the filtering — otherwise the page would pull every notice in the
+      // institute and drop most of them in the browser.
+      const { data: student, error: studentError } = await supabase
+        .from("students")
+        .select("course_slug, enrollment_date")
+        .eq("user_id", user.id)
+        .maybeSingle()
+
+      if (studentError) {
+        console.error("[announcements] student lookup failed:", studentError.message)
+        setLoadError("We couldn't load announcements for this account. Please refresh the page.")
+        setLoading(false)
+        return
+      }
+
+      let query = supabase
         .from("announcements")
         .select("*")
+        .in("target", announcementTargetsFor(student?.course_slug ?? null))
         .order("pinned", { ascending: false })
         .order("published_date", { ascending: false })
 
-      if (!error && data) {
-        setAnnouncements(
-          data.map((a) => ({
-            id: a.id,
-            title: a.title,
-            message: a.message,
-            date: formatDate(a.published_date),
-            author: a.author_name || "Admin",
-            priority: a.priority,
-            pinned: a.pinned,
-            target: a.target,
-          }))
-        )
+      // A notice written before this student enrolled is not about them — the
+      // institute posts course-intake and batch notices that are stale the day
+      // the batch starts. Skipped when the date is unknown, so a missing value
+      // never becomes an empty board.
+      if (student?.enrollment_date) {
+        query = query.gte("published_date", student.enrollment_date)
       }
+
+      const { data, error } = await query
+
+      // The old `if (!error && data)` dropped the failure on the floor and
+      // rendered the empty list below it. A student saw "No announcements yet"
+      // and concluded the institute had posted nothing, which is the opposite of
+      // what a permissions or network failure means.
+      if (error) {
+        console.error("[announcements] lookup failed:", error.message)
+        setLoadError(error.message)
+        setLoading(false)
+        return
+      }
+
+      setAnnouncements(
+        (data ?? []).map((a) => ({
+          id: a.id,
+          title: a.title,
+          message: a.message,
+          date: formatDate(a.published_date),
+          author: a.author_name || "Admin",
+          priority: a.priority,
+          pinned: a.pinned,
+          target: a.target,
+        }))
+      )
       setLoading(false)
     }
     fetchAnnouncements()
-  }, [])
+  }, [attempt])
 
   const pinned = announcements.filter((a) => a.pinned)
   const others = announcements.filter((a) => !a.pinned)
@@ -66,6 +116,31 @@ export default function StudentAnnouncements() {
     return (
       <div className="flex items-center justify-center p-12">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-4 p-4 sm:p-6 lg:p-8">
+        <h1 className="text-lg font-bold sm:text-xl">Announcements</h1>
+        <QueryError
+          what="announcements"
+          detail={loadError}
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </div>
+    )
+  }
+
+  if (announcements.length === 0) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-4 p-4 sm:p-6 lg:p-8">
+        <h1 className="text-lg font-bold sm:text-xl">Announcements</h1>
+        <EmptyState
+          title="No announcements yet"
+          description="Notices from the institute will appear here."
+        />
       </div>
     )
   }

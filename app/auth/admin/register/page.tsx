@@ -18,10 +18,10 @@ import {
   Loader2,
   AlertCircle,
 } from "lucide-react"
-import { supabase } from "@/lib/supabase"
 import { useToast } from "@/components/ui/sonner"
+import { describeAuthError } from "@/lib/errors"
 
-const ADMIN_REG_CODE = process.env.NEXT_PUBLIC_ADMIN_REG_CODE || "TNGC-ADMIN-2024"
+const MIN_PASSWORD_LENGTH = 8
 
 export default function AdminRegisterPage() {
   const router = useRouter()
@@ -33,86 +33,90 @@ export default function AdminRegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [adminCode, setAdminCode] = useState("")
   const [loading, setLoading] = useState(false)
-  const [oauthLoading, setOauthLoading] = useState(false)
   const [error, setError] = useState("")
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setLoading(true)
     setError("")
 
-    if (adminCode !== ADMIN_REG_CODE) {
-      setError("Invalid admin verification code.")
-      toast("Invalid admin verification code.", { variant: "destructive" })
-      setLoading(false)
+    const trimmedEmail = email.trim()
+
+    if (!fullName.trim()) {
+      setError("Full name is required")
       return
     }
 
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.")
-      toast("Password must be at least 6 characters.", { variant: "destructive" })
-      setLoading(false)
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmedEmail)) {
+      setError("Enter a valid email address")
+      return
+    }
+
+    if (phone && !/^\d{10}$/.test(phone)) {
+      setError("Enter a valid 10-digit phone number")
+      return
+    }
+
+    if (adminCode.trim().length === 0) {
+      setError("Enter the admin verification code.")
+      return
+    }
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`)
+      toast(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`, { variant: "destructive" })
+      return
+    }
+
+    if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+      setError("Password must contain at least one letter and one number.")
+      toast("Password must contain at least one letter and one number.", { variant: "destructive" })
       return
     }
 
     if (password !== confirmPassword) {
       setError("Passwords do not match.")
       toast("Passwords do not match.", { variant: "destructive" })
-      setLoading(false)
       return
     }
 
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: fullName, phone, role: "admin" },
-      },
-    })
+    setLoading(true)
 
-    if (signUpError) {
-      setError(signUpError.message)
-      toast("Registration failed: " + signUpError.message, { variant: "destructive" })
-      setLoading(false)
-      return
-    }
-
-    const userId = data.user?.id
-
-    if (userId) {
-      const { error: adminError } = await supabase.from("admins").insert({
-        user_id: userId,
-        full_name: fullName,
-        email,
-        phone: phone || null,
-        role: "Administrator",
-        admin_code: adminCode,
+    try {
+      // The invite code is validated on the server. Checking it here would ship
+      // the expected value to every visitor in the JavaScript bundle.
+      const res = await fetch("/api/admin/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: fullName.trim(),
+          email: trimmedEmail,
+          phone: phone.trim(),
+          password,
+          adminCode: adminCode.trim(),
+        }),
       })
 
-      if (adminError) {
-        console.warn("Admin record insert failed:", adminError.message)
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        const message = data.error || "We couldn't create the account."
+        setError(message)
+        toast(message, { variant: "destructive" })
+        return
       }
-    }
 
-    toast("Admin account created! Please check your email to confirm.", { variant: "success" })
-    router.push("/auth/admin/login")
-  }
-
-  async function handleGoogleSignIn() {
-    setOauthLoading(true)
-    setError("")
-
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/admin/login`,
-      },
-    })
-
-    if (error) {
-      setError(error.message)
-      toast("Google sign-in failed: " + error.message, { variant: "destructive" })
-      setOauthLoading(false)
+      toast("Admin account created", {
+        variant: "success",
+        description: "You can sign in to the admin portal now.",
+      })
+      router.replace("/auth/admin/login")
+    } catch (err) {
+      console.error("[auth] admin registration crashed:", err)
+      const info = describeAuthError(err)
+      setError(info.message)
+      toast(info.message, { variant: "destructive" })
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -136,7 +140,7 @@ export default function AdminRegisterPage() {
                 <Input
                   id="fullName"
                   type="text"
-                  placeholder="Admin Name"
+                  placeholder="Enter your name"
                   className="h-10 pl-10"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
@@ -152,7 +156,7 @@ export default function AdminRegisterPage() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="admin@tngc.edu"
+                  placeholder="Enter your email"
                   className="h-10 pl-10"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -256,33 +260,13 @@ export default function AdminRegisterPage() {
             </Button>
           </form>
 
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">or</span>
-            </div>
-          </div>
-
-          <Button
-            variant="outline"
-            className="h-10 w-full gap-2"
-            onClick={handleGoogleSignIn}
-            disabled={oauthLoading}
-          >
-            {oauthLoading ? (
-              <Loader2 className="size-5 animate-spin" />
-            ) : (
-              <svg className="size-5" viewBox="0 0 24 24">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-              </svg>
-            )}
-            {oauthLoading ? "Redirecting..." : "Continue with Google"}
-          </Button>
+          <p className="mt-6 flex items-start gap-2 rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
+            <KeyRound className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              Admin accounts can only be created with a verification code issued by the
+              institute. Ask an existing administrator if you need one.
+            </span>
+          </p>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Already have an account?{" "}

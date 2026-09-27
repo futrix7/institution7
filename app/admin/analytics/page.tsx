@@ -1,21 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  BarChart3,
-  TrendingUp,
-  Users,
-  BookOpen,
-  IndianRupee,
-  Download,
-  ArrowUpRight,
-  Target,
-  Award,
-  Activity,
-  Calendar,
-  Zap,
-  Loader2,
-} from "lucide-react";
+import { BarChart3, TrendingUp, Users, BookOpen, Download, ArrowUpRight, Activity, Calendar, Zap, Loader2 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,23 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { ExportDialog } from "@/components/admin/export-dialog";
-import {
-  AreaChart,
-  Area,
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
+import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { tooltipStyle, axisStyle, gridStyle, CHART_PALETTE } from "@/lib/chart-theme";
 import type { Database } from "@/types/database";
 
@@ -52,17 +22,12 @@ type Branch = Database["public"]["Tables"]["branches"]["Row"];
 
 const TABS = ["This Month", "This Quarter", "This Year"] as const;
 
-function formatDate(d: Date) {
-  return d.toISOString().split("T")[0];
-}
-
 function getMonthName(monthIndex: number) {
   const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return names[monthIndex];
 }
 
-function getWeekLabel(date: Date, now: Date): string {
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+function getWeekLabel(date: Date): string {
   const dayOfMonth = date.getDate();
   const weekNum = Math.ceil(dayOfMonth / 7);
   return `Week ${weekNum}`;
@@ -75,7 +40,7 @@ function computeEnrollmentTrends(students: Student[], activeTab: string) {
     students.forEach((s) => {
       const d = new Date(s.enrollment_date);
       if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
-        const label = getWeekLabel(d, now);
+        const label = getWeekLabel(d);
         grouped[label] = (grouped[label] || 0) + 1;
       }
     });
@@ -545,7 +510,7 @@ export default function AnalyticsPage() {
                   outerRadius={95}
                   paddingAngle={3}
                   dataKey="value"
-                  label={({ name, value }) => `${value}%`}
+                  label={({ value }) => `${value}%`}
                 >
                   {completionData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />

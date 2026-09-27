@@ -5,37 +5,8 @@ import { useRouter } from "next/navigation";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
-import {
-  Users,
-  BookOpen,
-  ClipboardCheck,
-  UserPlus,
-  GraduationCap,
-  FileText,
-  TrendingUp,
-  Clock,
-  MapPin,
-  IndianRupee,
-  AlertCircle,
-  CheckCircle2,
-  ArrowUpRight,
-  Loader2,
-} from "lucide-react";
+import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { Users, BookOpen, ClipboardCheck, UserPlus, TrendingUp, Clock, MapPin, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { tooltipStyle, axisStyle, gridStyle, CHART_PALETTE } from "@/lib/chart-theme";
@@ -214,9 +185,12 @@ export default function AdminDashboardPage() {
       setRecentEnrollments(recent);
 
       // --- Branch Revenue ---
+      // Verified payments only. Every status was being counted before, so an
+      // unverified claim and a reversed one both showed up as branch income.
       const branchRevenueMap = new Map<string, number>();
       const studentMap = new Map(students.map((s) => [s.id, s]));
       payments.forEach((p) => {
+        if (p.status !== "Paid") return;
         const student = studentMap.get(p.student_id);
         const branchId = student?.branch_id;
         const branchName = branchId ? branchMap.get(branchId) : null;

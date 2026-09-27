@@ -15,8 +15,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { ArrowLeft, Download, Search, CreditCard } from "lucide-react"
+import { ArrowLeft, Download, Search, CreditCard, ChevronDown } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { paymentStatusLabel } from "@/lib/payment-status"
+import { UpiPayBlock } from "@/components/student/upi-pay-block"
 import { Loader2 } from "lucide-react"
 
 interface Payment {
@@ -24,7 +26,7 @@ interface Payment {
   date: string
   amount: number
   mode: string
-  status: "Paid" | "Pending" | "Overdue"
+  status: "Paid" | "Pending" | "Overdue" | "Rejected"
   for: string
   receiptNo: string
 }
@@ -33,6 +35,10 @@ const statusConfig: Record<string, string> = {
   Paid: "bg-emerald-500/15 text-emerald-600",
   Pending: "bg-amber-500/15 text-amber-600",
   Overdue: "bg-red-500/15 text-red-600",
+  // Muted: a refused or reversed claim is not an outstanding debt, it is simply
+  // not money received. Red here would read as a warning the student must clear,
+  // when what they need to do is pay the installment again.
+  Rejected: "bg-muted text-muted-foreground",
 }
 
 export default function StudentPayments() {
@@ -72,7 +78,7 @@ export default function StudentPayments() {
               date: p.payment_date,
               amount: p.amount,
               mode: p.method,
-              status: p.status as "Paid" | "Pending" | "Overdue",
+              status: p.status as Payment["status"],
               for: p.description || "Fee Payment",
               receiptNo: p.receipt_no || "—",
             }))
@@ -101,6 +107,11 @@ export default function StudentPayments() {
 
   const totalPaid = payments.filter((p) => p.status === "Paid").reduce((s, p) => s + p.amount, 0)
   const totalPending = payments.filter((p) => p.status === "Pending").reduce((s, p) => s + p.amount, 0)
+
+  // The tab only appears when there is something in it: a "Rejected" filter on
+  // an account that has never had a claim refused is an empty screen with no
+  // way to understand why it is there.
+  const rejectedCount = payments.filter((p) => p.status === "Rejected").length
 
   const downloadReceipt = (p: Payment) => {
     const html = `<!DOCTYPE html>
@@ -140,7 +151,7 @@ export default function StudentPayments() {
     <div class="divider"></div>
     <div class="row amount"><span>Amount Paid</span><span>₹${p.amount.toLocaleString("en-IN")}</span></div>
     <div class="row"><span>Payment Method</span><span>${p.mode}</span></div>
-    <div class="row"><span>Status</span><span>${p.status}</span></div>
+    <div class="row"><span>Status</span><span>${paymentStatusLabel(p.status)}</span></div>
     <div class="divider"></div>
     <div class="thanks">Thank you for your payment!</div>
   </div>
@@ -190,11 +201,33 @@ export default function StudentPayments() {
         </Card>
         <Card>
           <CardContent className="p-3 sm:p-4">
-            <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">Pending</p>
+            <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">Awaiting verification</p>
             <p className="text-xl sm:text-2xl font-bold text-amber-600">₹{totalPending.toLocaleString()}</p>
           </CardContent>
         </Card>
       </div>
+
+      {/*
+        How to pay, on the page a student lands on after being told they owe
+        something. The amount is left off the QR deliberately: this figure is the
+        total still owed across every course, and a QR that pre-fills the wrong
+        number is worse than one that asks.
+      */}
+      <Card>
+        <CardContent className="p-3 sm:p-4">
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-medium">
+              <span>How to pay</span>
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="pt-4">
+              <UpiPayBlock
+                note="After you pay, enter the UPI reference on the fee page so our team can verify it."
+              />
+            </div>
+          </details>
+        </CardContent>
+      </Card>
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -210,7 +243,10 @@ export default function StudentPayments() {
         <TabsList className="w-full sm:w-auto">
           <TabsTrigger value="all">All</TabsTrigger>
           <TabsTrigger value="paid">Paid</TabsTrigger>
-          <TabsTrigger value="pending">Pending</TabsTrigger>
+          <TabsTrigger value="pending">Awaiting verification</TabsTrigger>
+          {rejectedCount > 0 && (
+            <TabsTrigger value="rejected">Rejected ({rejectedCount})</TabsTrigger>
+          )}
         </TabsList>
       </Tabs>
 
@@ -229,7 +265,7 @@ export default function StudentPayments() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <p className="text-xs sm:text-sm font-medium truncate">{p.for}</p>
-                    <Badge variant="secondary" className={`text-[10px] shrink-0 ${statusConfig[p.status]}`}>{p.status}</Badge>
+                    <Badge variant="secondary" className={`text-[10px] shrink-0 ${statusConfig[p.status]}`}>{paymentStatusLabel(p.status)}</Badge>
                   </div>
                   <p className="text-[11px] text-muted-foreground">{p.date} &middot; {p.mode}</p>
                 </div>
@@ -300,7 +336,7 @@ export default function StudentPayments() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Status</span>
-                  <Badge variant="secondary" className={`text-[10px] ${statusConfig[receiptPayment.status]}`}>{receiptPayment.status}</Badge>
+                  <Badge variant="secondary" className={`text-[10px] ${statusConfig[receiptPayment.status]}`}>{paymentStatusLabel(receiptPayment.status)}</Badge>
                 </div>
               </div>
 

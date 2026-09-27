@@ -7,13 +7,6 @@ import { ArrowRight } from "lucide-react"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-const BADGES = [
-  { icon: "🏛️", label: "AIACTE Affiliated" },
-  { icon: "🏆", label: "ISO 9001:2015" },
-  { icon: "🌐", label: "Consulate Recognised" },
-  { icon: "🎓", label: "Employment Exchange" },
-]
-
 export function Hero() {
   return (
     <section className="relative flex min-h-dvh w-full items-center justify-center overflow-hidden bg-background py-2 sm:py-3">
@@ -89,26 +82,6 @@ export function Hero() {
               </motion.div>
             </div>
           </div>
-
-          {/* Badges pinned to the bottom of the card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.65, ease: "easeOut" }}
-            className="w-full px-4 pb-4 sm:px-6 sm:pb-6 lg:px-8"
-          >
-            <div className="mx-auto grid max-w-5xl grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-              {BADGES.map((badge) => (
-                <div
-                  key={badge.label}
-                  className="flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-black/50 px-3 py-2.5 text-xs font-medium text-white shadow-sm backdrop-blur-md transition-colors hover:border-white/30 hover:bg-black/60 sm:px-4 sm:py-3"
-                >
-                  <span className="text-base leading-none">{badge.icon}</span>
-                  <span className="leading-tight">{badge.label}</span>
-                </div>
-              ))}
-            </div>
-          </motion.div>
         </div>
       </motion.div>
     </section>

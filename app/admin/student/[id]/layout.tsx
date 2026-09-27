@@ -2,7 +2,7 @@
 
 import { use, useState, useEffect, createContext, useContext } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,21 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  ArrowLeft,
-  UserCircle,
-  Mail,
-  Phone,
-  BookOpen,
-  Trash2,
-  Loader2,
-  User,
-  CalendarCheck,
-  Wallet,
-  CreditCard,
-  Award,
-  IndianRupee,
-} from "lucide-react"
+import { ArrowLeft, Mail, Phone, Trash2, Loader2, User, CalendarCheck, Wallet, CreditCard, Award, IndianRupee } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/components/ui/sonner"
@@ -75,6 +61,7 @@ export default function StudentLayout({
 }) {
   const { id } = use(params)
   const pathname = usePathname()
+  const router = useRouter()
   const { toast } = useToast()
   const [student, setStudent] = useState<StudentData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -148,7 +135,9 @@ export default function StudentLayout({
     toast("Student deleted successfully", { variant: "success" })
     setDeleting(false)
     setDeleteOpen(false)
-    window.location.href = "/admin/student"
+    // Client-side navigation rather than a full page load: the deleted route
+    // must not be re-fetched from the router cache on the way out.
+    router.replace("/admin/student")
   }
 
   if (loading) {

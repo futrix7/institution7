@@ -24,6 +24,7 @@ interface StudentOption {
   id: string
   full_name: string
   course_slug?: string | null
+  branch_id?: string | null
 }
 
 const PAYMENT_METHODS = ["UPI", "Cash", "Card", "Net Banking", "Cheque"]
@@ -45,7 +46,7 @@ export function RecordPaymentSheet({ open, onOpenChange, onSuccess }: RecordPaym
     if (!open) return
     async function loadData() {
       const [studentRes, courseRes] = await Promise.all([
-        supabase.from("students").select("id, full_name, course_slug").order("full_name"),
+        supabase.from("students").select("id, full_name, course_slug, branch_id").order("full_name"),
         supabase.from("courses").select("slug, name"),
       ])
       if (studentRes.data) setStudents(studentRes.data)
@@ -82,9 +83,14 @@ export function RecordPaymentSheet({ open, onOpenChange, onSuccess }: RecordPaym
 
     setSaving(true)
     const selected = students.find((s) => s.id === studentId)
-    const timestamp = Date.now()
+
+    // crypto.randomUUID rather than Date.now(): two payments saved in the same
+    // millisecond would mint the same primary key, and a duplicate-key error is
+    // a hard failure that loses the entry the admin just typed in.
+    const token = crypto.randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()
+
     const { error } = await supabase.from("payments").insert({
-      id: `PAY-${timestamp}`,
+      id: `PAY-${new Date().getFullYear()}-${token}`,
       student_id: studentId,
       student_name: selected?.full_name ?? "",
       course_slug: courseSlug || null,
@@ -92,8 +98,12 @@ export function RecordPaymentSheet({ open, onOpenChange, onSuccess }: RecordPaym
       payment_date: paymentDate,
       method,
       status,
-      receipt_no: `RCT-${timestamp}`,
+      receipt_no: `RCT-${token}`,
       description: description.trim() || null,
+      // The finance dashboard groups revenue by branch, so a payment recorded
+      // without one disappears from that breakdown. Taken from the student
+      // rather than typed, so it cannot be misattributed.
+      branch_id: selected?.branch_id ?? null,
     })
     setSaving(false)
 
@@ -193,7 +203,7 @@ export function RecordPaymentSheet({ open, onOpenChange, onSuccess }: RecordPaym
       <FormField label="Description" htmlFor="description">
         <textarea
           id="description"
-          placeholder="Optional note (e.g. UTR number)"
+          placeholder="Enter the note (optional)"
           rows={2}
           value={description}
           onChange={(e) => setDescription(e.target.value)}

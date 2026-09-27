@@ -14,6 +14,7 @@ import {
   Moon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AuthGuard } from "@/components/auth/auth-guard"
 
 const navLinks = [
   { label: "Home", href: "/student/dashboard", icon: LayoutDashboard },
@@ -32,7 +33,7 @@ function ThemeToggle() {
   return (
     <button
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-      className="inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       aria-label="Toggle theme"
     >
       {mounted
@@ -46,67 +47,62 @@ function ThemeToggle() {
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
-  const isActive = (href: string) => pathname === href
+  // Marks a section live, not just the exact path. `/student/profile` is a real
+  // destination and so are its children, and without this the pill highlighted
+  // nothing at all while a student browsed their own profile.
+  const isSectionActive = (href: string) =>
+    pathname === href || pathname.startsWith(`${href}/`)
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:flex w-60 shrink-0 flex-col border-r border-border bg-card">
-        <div className="flex h-14 items-center gap-2 border-b border-border px-4">
-          <div className="flex size-7 items-center justify-center rounded-lg bg-primary px-1 py-0.5 text-primary-foreground text-[10px] font-extrabold">
-            TNGC
-          </div>
-          <span className="text-sm font-bold">Student Portal</span>
-        </div>
+    <AuthGuard role="student">
+    <div className="h-screen overflow-hidden bg-background">
+      {/* Main content. pb reserves the height of the floating pill so the last
+          card is never trapped underneath it. */}
+      <main className="h-full overflow-y-auto pb-28">{children}</main>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-1 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
-          {navLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={cn(
-                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                isActive(link.href)
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-            >
-              <link.icon className="size-4" />
-              {link.label}
-            </Link>
-          ))}
-        </nav>
+      {/*
+        One floating pill for every breakpoint, replacing the desktop sidebar and
+        the separate mobile bottom bar.
 
-        <div className="border-t border-border p-3">
-          <ThemeToggle />
-        </div>
-      </aside>
+        Centred rather than full-width: a bar stretched edge to edge on a
+        desktop display puts "Home" 2000px away from "Profile" and reads as a
+        phone layout stretched. The pill keeps the target next to the thumb and
+        next to the pointer at the same time.
 
-      {/* Main content */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <main className="flex-1 overflow-y-auto pb-20 lg:pb-6">{children}</main>
-      </div>
+        Labels are hidden below md. Five labelled items plus the toggle measure
+        ~620px, which overflows a 640-768px viewport and would either clip the
+        pill or force a second row; icons alone fit from 320px up.
+      */}
+      <nav
+        aria-label="Student portal"
+        className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 sm:bottom-6"
+      >
+        <div className="flex items-center gap-0.5 rounded-full border border-border bg-card/95 p-1.5 shadow-lg shadow-black/5 backdrop-blur-md dark:shadow-black/30">
+          {navLinks.map((link) => {
+            const active = isSectionActive(link.href)
 
-      {/* Mobile classic bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-card lg:hidden">
-        <div className="flex items-center justify-around px-1.5 py-1">
-          {navLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={cn(
-                "flex flex-1 min-w-0 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] font-medium transition-colors",
-                isActive(link.href) ? "text-primary" : "text-muted-foreground"
-              )}
-            >
-              <link.icon className="size-5" />
-              <span className="whitespace-nowrap">{link.label}</span>
-            </Link>
-          ))}
-          <div className="mx-0.5 h-6 w-px shrink-0 bg-border" />
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors",
+                  active
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <link.icon className="size-4 shrink-0" />
+                <span className="hidden md:inline">{link.label}</span>
+              </Link>
+            )
+          })}
+          <div className="mx-1 h-6 w-px shrink-0 bg-border" />
           <ThemeToggle />
         </div>
       </nav>
     </div>
+    </AuthGuard>
   )
 }
