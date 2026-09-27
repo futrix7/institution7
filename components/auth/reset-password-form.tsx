@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { useToast } from "@/components/ui/sonner"
 import { ROLE_LOGIN, type AuthRole } from "@/hooks/use-auth"
+import { PasswordVisibilityToggle } from "@/components/auth/password-visibility-toggle"
 
 const PORTAL_NAME: Record<AuthRole, string> = {
   admin: "the admin portal",
@@ -40,6 +41,8 @@ export function ResetPasswordForm({ role }: { role: AuthRole }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [passwordVisible, setPasswordVisible] = useState(false)
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false)
 
   const [updating, setUpdating] = useState(false)
 
@@ -104,7 +107,7 @@ export function ResetPasswordForm({ role }: { role: AuthRole }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/50 px-4 py-12">
+    <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-background via-background to-muted/50 px-4 py-12">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary/10">
@@ -152,14 +155,20 @@ export function ResetPasswordForm({ role }: { role: AuthRole }) {
                 <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   id="password"
-                  type="password"
+                  type={passwordVisible ? "text" : "password"}
                   autoComplete="new-password"
                   placeholder="At least 8 characters"
-                  className="h-10 pl-10"
+                  className="h-10 pl-10 pr-10"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={updating}
                   required
+                />
+                <PasswordVisibilityToggle
+                  visible={passwordVisible}
+                  label="new password"
+                  onToggle={() => setPasswordVisible((visible) => !visible)}
+                  disabled={updating}
                 />
               </div>
               <p className="text-xs text-muted-foreground">
@@ -173,14 +182,20 @@ export function ResetPasswordForm({ role }: { role: AuthRole }) {
                 <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   id="confirmPassword"
-                  type="password"
+                  type={confirmPasswordVisible ? "text" : "password"}
                   autoComplete="new-password"
                   placeholder="Re-enter new password"
-                  className="h-10 pl-10"
+                  className="h-10 pl-10 pr-10"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   disabled={updating}
                   required
+                />
+                <PasswordVisibilityToggle
+                  visible={confirmPasswordVisible}
+                  label="confirm new password"
+                  onToggle={() => setConfirmPasswordVisible((visible) => !visible)}
+                  disabled={updating}
                 />
               </div>
             </div>

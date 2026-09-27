@@ -22,9 +22,9 @@ WHERE schemaname = 'public' AND tablename = 'rate_limit_log';
 SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args
 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'public'
-AND p.proname IN ('submit_installment_payments','verify_installment_payments',
+AND p.proname IN ('enroll_student_in_course','submit_installment_payments','verify_installment_payments',
 'mark_installment_paid','unmark_installment',
-'replace_installment_plan','create_fee_schedule','apply_fee_delta')
+'create_fee_schedule','apply_fee_delta')
 ORDER BY p.proname, args;
 
 SELECT p.proname, r.rname
@@ -33,7 +33,7 @@ JOIN pg_namespace n ON n.oid = p.pronamespace
 JOIN LATERAL unnest(p.proacl) acl ON true
 JOIN pg_roles r ON r.oid = acl.grantee
 WHERE n.nspname = 'public' AND r.rname IN ('anon','authenticated')
-AND p.proname IN ('submit_installment_payments','verify_installment_payments',
+AND p.proname IN ('enroll_student_in_course','submit_installment_payments','verify_installment_payments',
 'mark_installment_paid','unmark_installment');
 
 SELECT e.enumlabel FROM pg_enum e

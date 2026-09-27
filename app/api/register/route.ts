@@ -1,15 +1,10 @@
 import { NextResponse } from "next/server"
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin"
-import { checkRateAcross } from "@/lib/rate-limit"
-import { describeApiFailure, failureResponse, respondWithFailure } from "@/lib/api-response"
+import { respondWithFailure } from "@/lib/api-response"
 import { isSchemaDriftError } from "@/lib/db-errors"
 
 const MIN_PASSWORD_LENGTH = 8
 const MAX_COURSES = 6
-
-const REGISTER_WINDOW_MS = 60 * 60 * 1000
-const MAX_ATTEMPTS_PER_EMAIL = 5
-const MAX_ATTEMPTS_PER_IP = 20
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
@@ -34,14 +29,6 @@ async function discardOrphanAccount(userId: string): Promise<void> {
   }
 }
 
-function clientIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  )
-}
-
 type Parsed = {
   email: string
   password: string
@@ -56,6 +43,7 @@ type Parsed = {
   paymentReference: string
   /** Which of the three installments are being settled at registration. */
   paidInstallments: number[]
+  customPaymentAmount: number | null
 }
 
 /**
@@ -77,6 +65,11 @@ function parseBody(body: Record<string, unknown>): { ok: true; data: Parsed } | 
   const presentStatus = str(body.presentStatus)
   const signature = str(body.signature)
   const paymentReference = str(body.paymentReference)
+  const rawCustomPaymentAmount = body.customPaymentAmount
+  const customPaymentAmount =
+    typeof rawCustomPaymentAmount === "number" && Number.isFinite(rawCustomPaymentAmount)
+      ? rawCustomPaymentAmount
+      : null
 
   // Which installments of the three-part schedule are being paid now. Clamped to
   // the real range and de-duplicated rather than trusted: this reaches an RPC
@@ -92,6 +85,13 @@ function parseBody(body: Record<string, unknown>): { ok: true; data: Parsed } | 
   const courseSlugs = rawCourses.map((s) => s.trim()).filter(Boolean)
 
   if (!EMAIL_PATTERN.test(email)) return { ok: false, error: "Enter a valid email address." }
+
+  if (rawCustomPaymentAmount !== undefined && rawCustomPaymentAmount !== null && customPaymentAmount === null) {
+    return { ok: false, error: "Enter a valid custom payment amount." }
+  }
+  if (customPaymentAmount !== null && customPaymentAmount <= 0) {
+    return { ok: false, error: "Custom payment must be greater than zero." }
+  }
 
   if (password.length < MIN_PASSWORD_LENGTH) {
     return { ok: false, error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` }
@@ -137,6 +137,7 @@ function parseBody(body: Record<string, unknown>): { ok: true; data: Parsed } | 
       signature,
       paymentReference,
       paidInstallments,
+      customPaymentAmount,
     },
   }
 }
@@ -186,36 +187,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
 
-  const { email, password, fullName, phone, fatherName, fatherPhone, branchId, courseSlugs, presentStatus, signature, paymentReference, paidInstallments } =
+  const { email, password, fullName, phone, fatherName, fatherPhone, branchId, courseSlugs, presentStatus, signature, paymentReference, paidInstallments, customPaymentAmount } =
     parsed.data
-
-  const ip = clientIp(request)
-
-  // Throttled before anything is written, so the endpoint cannot be used to
-  // enumerate which addresses already have accounts.
-  let rate: { allowed: boolean; retryInSec: number }
-  try {
-    rate = await checkRateAcross(
-      [
-        { scope: `register:email:${email}`, limit: MAX_ATTEMPTS_PER_EMAIL },
-        ...(ip !== "unknown" ? [{ scope: `register:ip:${ip}`, limit: MAX_ATTEMPTS_PER_IP }] : []),
-      ],
-      REGISTER_WINDOW_MS
-    )
-  } catch (err) {
-    // Fails closed: if the throttle cannot be consulted the request is refused
-    // rather than admitted unmetered.
-    const failure = describeApiFailure(err, "register/rate-limit")
-    return failureResponse({ ...failure, status: 503, error: "Registration is unavailable right now." })
-  }
-
-  if (!rate.allowed) {
-    const mins = Math.max(1, Math.ceil(rate.retryInSec / 60))
-    return NextResponse.json(
-      { error: `Too many attempts. Please try again in ${mins} minute${mins === 1 ? "" : "s"}.` },
-      { status: 429 }
-    )
-  }
 
   // The branch and the courses are checked against the database rather than
   // trusted, so a hand-crafted request cannot enrol against a branch that does
@@ -289,7 +262,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { data, error: rpcError } = await supabaseAdmin.rpc("register_student", {
+    const registrationArgs = {
       p_user_id: userId,
       p_full_name: fullName,
       p_email: email,
@@ -306,8 +279,12 @@ export async function POST(request: Request) {
       p_paid_installment_nos: paidInstallments,
       p_payment_description: paymentReference
         ? `UPI reference: ${paymentReference}`
-        : `UPI payment for installment${paidInstallments.length === 1 ? "" : "s"} ${paidInstallments.join(", ")}`,
-    })
+        : customPaymentAmount !== null
+          ? `UPI custom payment: ₹${customPaymentAmount.toLocaleString("en-IN")}`
+          : `UPI payment for installment${paidInstallments.length === 1 ? "" : "s"} ${paidInstallments.join(", ")}`,
+      ...(customPaymentAmount !== null ? { p_custom_payment_amount: customPaymentAmount } : {}),
+    }
+    const { data, error: rpcError } = await supabaseAdmin.rpc("register_student", registrationArgs)
 
     if (rpcError) {
       // The transaction rolled back, so the only thing left behind is a login
@@ -328,7 +305,7 @@ export async function POST(request: Request) {
           rpcError.message
         )
         return NextResponse.json(
-          { error: "Registration is unavailable right now. Please contact the institute." },
+          { error: "Registration setup needs an update. Please contact the institute before retrying." },
           { status: 503 }
         )
       }

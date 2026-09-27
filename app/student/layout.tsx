@@ -33,12 +33,12 @@ function ThemeToggle() {
   return (
     <button
       onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-      className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="inline-flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:size-9"
       aria-label="Toggle theme"
     >
       {mounted
-        ? theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />
-        : <Sun className="size-4" />
+        ? theme === "dark" ? <Sun className="size-5 md:size-4" /> : <Moon className="size-5 md:size-4" />
+        : <Sun className="size-5 md:size-4" />
       }
     </button>
   )
@@ -75,9 +75,9 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       */}
       <nav
         aria-label="Student portal"
-        className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 sm:bottom-6"
+        className="fixed bottom-4 left-1/2 z-40 max-w-[calc(100vw-1rem)] -translate-x-1/2 sm:bottom-6"
       >
-        <div className="flex items-center gap-0.5 rounded-full border border-border bg-card/95 p-1.5 shadow-lg shadow-black/5 backdrop-blur-md dark:shadow-black/30">
+        <div className="flex items-center gap-0.5 rounded-full border border-border bg-card/95 p-2 shadow-lg shadow-black/5 backdrop-blur-md dark:shadow-black/30">
           {navLinks.map((link) => {
             const active = isSectionActive(link.href)
 
@@ -87,18 +87,18 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
                 href={link.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors",
+                  "flex h-11 min-w-11 items-center justify-center gap-2 rounded-full px-3 py-3 text-sm font-medium transition-colors md:h-auto md:min-w-0 md:justify-start md:py-2",
                   active
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
-                <link.icon className="size-4 shrink-0" />
+                <link.icon className="size-5 shrink-0 md:size-4" />
                 <span className="hidden md:inline">{link.label}</span>
               </Link>
             )
           })}
-          <div className="mx-1 h-6 w-px shrink-0 bg-border" />
+          <div className="mx-1 h-8 w-px shrink-0 bg-border md:h-6" />
           <ThemeToggle />
         </div>
       </nav>

@@ -56,6 +56,7 @@ import {
   Legend,
 } from "recharts";
 import { tooltipStyle, axisStyle, gridStyle, CHART_PALETTE } from "@/lib/chart-theme";
+import { AddExpenseSheet } from "@/components/admin/add-expense-sheet";
 
 interface SummaryCard {
   title: string;
@@ -104,6 +105,7 @@ function formatCurrencyINR(value: number): string {
 
 export default function AdminFinancePage() {
   const [exportOpen, setExportOpen] = useState(false);
+  const [expenseOpen, setExpenseOpen] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [pin, setPin] = useState("");
   const [error, setError] = useState(false);
@@ -119,6 +121,7 @@ export default function AdminFinancePage() {
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
   const [allTransactions, setAllTransactions] = useState<RecentTransaction[]>([]);
   const [showAllTxns, setShowAllTxns] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const handleVerify = useCallback(async () => {
     setLoading(true);
@@ -212,13 +215,11 @@ export default function AdminFinancePage() {
         branchesResult.data.forEach((b) => branchMap.set(b.id, b.name));
       }
 
-      // Summary
-      const totalIncome = transactions
-        .filter((t) => t.type === "income")
-        .reduce((sum, t) => sum + Number(t.amount), 0);
-      const totalExpenses = transactions
-        .filter((t) => t.type === "expense")
-        .reduce((sum, t) => sum + Number(t.amount), 0);
+      const verifiedPayments = (payments || []).filter((p) => p.status === "Paid");
+      const expenseTransactions = (transactions || []).filter((t) => t.type === "expense");
+
+      const totalIncome = verifiedPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+      const totalExpenses = expenseTransactions.reduce((sum, t) => sum + Number(t.amount), 0);
       const netProfit = totalIncome - totalExpenses;
       const profitMargin = totalIncome > 0 ? Math.round((netProfit / totalIncome) * 100) : 0;
 
@@ -261,7 +262,6 @@ export default function AdminFinancePage() {
         },
       ]);
 
-      // Monthly data (last 6 months)
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const now = new Date();
       const monthlyMap = new Map<string, { revenue: number; expenses: number }>();
@@ -272,30 +272,31 @@ export default function AdminFinancePage() {
         monthlyMap.set(key, { revenue: 0, expenses: 0 });
       }
 
-      for (const t of transactions) {
-        const d = new Date(t.date);
+      for (const payment of verifiedPayments) {
+        const d = new Date(payment.payment_date);
         const key = monthNames[d.getMonth()];
         if (monthlyMap.has(key)) {
-          const entry = monthlyMap.get(key)!;
-          if (t.type === "income") {
-            entry.revenue += Number(t.amount);
-          } else {
-            entry.expenses += Number(t.amount);
-          }
+          monthlyMap.get(key)!.revenue += Number(payment.amount);
+        }
+      }
+
+      for (const transaction of expenseTransactions) {
+        const d = new Date(transaction.date);
+        const key = monthNames[d.getMonth()];
+        if (monthlyMap.has(key)) {
+          monthlyMap.get(key)!.expenses += Number(transaction.amount);
         }
       }
 
       setMonthlyData(Array.from(monthlyMap.entries()).map(([month, vals]) => ({ month, ...vals })));
 
-      // Expense breakdown
       const expenseMap = new Map<string, number>();
-      for (const t of transactions) {
-        if (t.type === "expense") {
-          expenseMap.set(t.category, (expenseMap.get(t.category) || 0) + Number(t.amount));
-        }
+      for (const transaction of expenseTransactions) {
+        const category = transaction.category || "Other";
+        expenseMap.set(category, (expenseMap.get(category) || 0) + Number(transaction.amount));
       }
 
-      const totalExpenseAmt = Array.from(expenseMap.values()).reduce((s, v) => s + v, 0);
+      const totalExpenseAmt = Array.from(expenseMap.values()).reduce((sum, value) => sum + value, 0);
       const expenseItems: ExpenseItem[] = Array.from(expenseMap.entries())
         .sort((a, b) => b[1] - a[1])
         .map(([name, value]) => ({
@@ -305,14 +306,13 @@ export default function AdminFinancePage() {
         }));
       setExpenseBreakdown(expenseItems);
 
-      // Course revenue
       const courseRevMap = new Map<string, number>();
-      for (const p of payments) {
-        const slug = p.course_slug || "unknown";
-        courseRevMap.set(slug, (courseRevMap.get(slug) || 0) + Number(p.amount));
+      for (const payment of verifiedPayments) {
+        const slug = payment.course_slug || "Unknown";
+        courseRevMap.set(slug, (courseRevMap.get(slug) || 0) + Number(payment.amount));
       }
 
-      const totalCourseRev = Array.from(courseRevMap.values()).reduce((s, v) => s + v, 0);
+      const totalCourseRev = Array.from(courseRevMap.values()).reduce((sum, value) => sum + value, 0);
       const courseRevItems: CourseRevenueItem[] = Array.from(courseRevMap.entries())
         .sort((a, b) => b[1] - a[1])
         .map(([slug, amount]) => ({
@@ -322,31 +322,47 @@ export default function AdminFinancePage() {
         }));
       setCourseRevenue(courseRevItems);
 
-      // Branch data
       const branchRevMap = new Map<string, number>();
-      for (const p of payments) {
-        const bId = p.branch_id || "unknown";
-        branchRevMap.set(bId, (branchRevMap.get(bId) || 0) + Number(p.amount));
+      for (const payment of verifiedPayments) {
+        const branchId = payment.branch_id || "unknown";
+        branchRevMap.set(branchId, (branchRevMap.get(branchId) || 0) + Number(payment.amount));
       }
 
       const branchItems: BranchDatum[] = Array.from(branchRevMap.entries())
         .sort((a, b) => b[1] - a[1])
-        .map(([bId, revenue]) => ({
-          branch: branchMap.get(bId) || "Unknown",
+        .map(([branchId, revenue]) => ({
+          branch: branchMap.get(branchId) || "Unknown",
           revenue,
         }));
       setBranchData(branchItems);
 
-      // Recent transactions
-      const allTxns: RecentTransaction[] = transactions
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .map((t) => ({
-          date: new Date(t.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-          description: t.description,
-          category: t.category,
-          amount: formatCurrencyINR(Number(t.amount)),
-          type: t.type,
-        }));
+      const mergedIncomeRows: RecentTransaction[] = verifiedPayments.map((payment) => ({
+        date: new Date(payment.payment_date).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        }),
+        description: payment.student_name || "Course payment",
+        category: (payment.course_slug && courseMap.get(payment.course_slug)) || "Course Fee",
+        amount: formatCurrencyINR(Number(payment.amount)),
+        type: "income",
+      }));
+
+      const mergedExpenseRows: RecentTransaction[] = expenseTransactions.map((transaction) => ({
+        date: new Date(transaction.date).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        }),
+        description: transaction.description || "Expense",
+        category: transaction.category || "Other",
+        amount: formatCurrencyINR(Number(transaction.amount)),
+        type: "expense",
+      }));
+
+      const allTxns: RecentTransaction[] = [...mergedIncomeRows, ...mergedExpenseRows]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
       setAllTransactions(allTxns);
       setRecentTransactions(allTxns.slice(0, 10));
 
@@ -363,7 +379,7 @@ export default function AdminFinancePage() {
     return () => {
       active = false;
     };
-  }, [authenticated]);
+  }, [authenticated, refreshKey]);
 
   return (
     <div className="space-y-6">
@@ -376,9 +392,16 @@ export default function AdminFinancePage() {
           </p>
         </div>
         {authenticated && (
-          <Button variant="outline" className="gap-2" onClick={() => setExportOpen(true)}>            <Download className="h-4 w-4" />
-            Export Report
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" className="gap-2" onClick={() => setExpenseOpen(true)}>
+              <Wallet className="h-4 w-4" />
+              Add Expense
+            </Button>
+            <Button variant="outline" className="gap-2" onClick={() => setExportOpen(true)}>
+              <Download className="h-4 w-4" />
+              Export Report
+            </Button>
+          </div>
         )}
       </div>
 
@@ -488,7 +511,7 @@ export default function AdminFinancePage() {
                     <div className="flex items-center gap-2">
                       <BarChart3 className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm text-muted-foreground">
-                        Total: {formatCurrencyINR(summaryCards[0] ? parseInt(summaryCards[0].value.replace(/[₹,]/g, "")) || 0 : 0)}
+                        Total Revenue: {formatCurrencyINR(monthlyData.reduce((sum, item) => sum + Number(item.revenue || 0), 0))}
                       </span>
                     </div>
                   </div>
@@ -735,6 +758,15 @@ export default function AdminFinancePage() {
           )}
         </>
       )}
+      <AddExpenseSheet
+        open={expenseOpen}
+        onOpenChange={setExpenseOpen}
+        onSuccess={() => {
+          if (!authenticated) return;
+          setRefreshKey((prev) => prev + 1);
+          setShowAllTxns(true);
+        }}
+      />
       <ExportDialog
         open={exportOpen}
         onOpenChange={setExportOpen}

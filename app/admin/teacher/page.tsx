@@ -5,7 +5,6 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-;
 import {
   Search,
   Plus,
@@ -15,26 +14,37 @@ import {
   Phone,
   Award,
   BookOpen,
+  IndianRupee,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AddTeacherSheet } from "@/components/admin/add-teacher-sheet";
+import { EditTeacherSheet, type TeacherRecord } from "@/components/admin/edit-teacher-sheet";
 import { supabase } from "@/lib/supabase";
+import { useToast } from "@/components/ui/sonner";
 
 interface Teacher {
   id: string;
   name: string;
   role: string;
   branch: string;
+  branchId: string | null;
   subjects: string[];
   experience: number;
   status: "Active" | "On Leave";
   email: string;
   phone: string;
+  salary: number | null;
 }
 
 export default function TeachersPage() {
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [salaryOpen, setSalaryOpen] = useState(false);
+  const [selectedTeacher, setSelectedTeacher] = useState<TeacherRecord | null>(null);
+  const [salaryTeacher, setSalaryTeacher] = useState<Teacher | null>(null);
+  const [salaryMonth, setSalaryMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [loading, setLoading] = useState(true);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
 
@@ -56,15 +66,78 @@ export default function TeachersPage() {
       name: t.full_name,
       role: t.role,
       branch: t.branches?.name ?? "",
+      branchId: t.branch_id ?? null,
       subjects: t.subjects ?? [],
       experience: t.experience ?? 0,
       status: t.status ?? "Active",
       email: t.email,
       phone: t.phone,
+      salary: t.salary ?? null,
     }));
 
     setTeachers(mapped);
     setLoading(false);
+  }
+
+  async function handlePaySalary(teacher: Teacher, month: string) {
+    const amount = Number(teacher.salary ?? 0);
+
+    if (!teacher.salary || amount <= 0) {
+      toast("Add a valid monthly salary before paying this teacher", { variant: "destructive" });
+      return;
+    }
+
+    if (!month) {
+      toast("Select the salary month first", { variant: "destructive" });
+      return;
+    }
+
+    const monthStart = `${month}-01`;
+    const monthEnd = new Date(`${month}-15T12:00:00`);
+    monthEnd.setMonth(monthEnd.getMonth() + 1, 0);
+    const monthEndIso = monthEnd.toISOString().slice(0, 10);
+
+    const { data: existingSalary, error: lookupError } = await supabase
+      .from("transactions")
+      .select("id")
+      .eq("type", "expense")
+      .eq("category", "Salary")
+      .ilike("description", `%Teacher salary - ${teacher.name} - ${month}%`)
+      .gte("date", monthStart)
+      .lte("date", monthEndIso)
+      .limit(1)
+      .maybeSingle();
+
+    if (lookupError && lookupError.code !== "PGRST116") {
+      toast("Unable to verify prior salary payment: " + lookupError.message, { variant: "destructive" });
+      return;
+    }
+
+    if (existingSalary) {
+      toast(`Salary for ${teacher.name} is already recorded for ${month}.`, { variant: "warning" });
+      setSalaryOpen(false);
+      setSalaryTeacher(null);
+      return;
+    }
+
+    const { error } = await supabase.from("transactions").insert({
+      date: new Date(`${month}-01T12:00:00`).toISOString().slice(0, 10),
+      description: `Teacher salary - ${teacher.name} - ${month}`,
+      category: "Salary",
+      amount,
+      type: "expense",
+      branch_id: teacher.branchId,
+    });
+
+    if (error) {
+      toast("Failed to record teacher salary: " + error.message, { variant: "destructive" });
+      return;
+    }
+
+    toast(`Salary paid for ${teacher.name} in ${month}`, { variant: "success" });
+    setSalaryOpen(false);
+    setSalaryTeacher(null);
+    setSalaryMonth(new Date().toISOString().slice(0, 7));
   }
 
   useEffect(() => {
@@ -85,7 +158,7 @@ export default function TeachersPage() {
     { label: "Total Teachers", value: teachers.length, color: "text-accent-foreground" },
     { label: "Active", value: teachers.filter((t) => t.status === "Active").length, color: "text-emerald-600" },
     { label: "On Leave", value: teachers.filter((t) => t.status === "On Leave").length, color: "text-amber-600" },
-    { label: "Total Subjects", value: teachers.reduce((sum, t) => sum + t.subjects.length, 0), color: "text-violet-600" },
+    { label: "Monthly Salary", value: `₹${teachers.reduce((sum, t) => sum + Number(t.salary ?? 0), 0).toLocaleString("en-IN")}`, color: "text-violet-600" },
   ];
 
   if (loading) {
@@ -98,7 +171,6 @@ export default function TeachersPage() {
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Teachers</h1>
         <p className="text-muted-foreground">
@@ -106,7 +178,6 @@ export default function TeachersPage() {
         </p>
       </div>
 
-      {/* Summary Stats */}
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.label}>
@@ -118,7 +189,6 @@ export default function TeachersPage() {
         ))}
       </div>
 
-      {/* Toolbar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -143,7 +213,6 @@ export default function TeachersPage() {
         </Button>
       </div>
 
-      {/* Teacher Cards Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {filteredTeachers.map((teacher) => (
           <Card key={teacher.id} className="transition-shadow hover:shadow-md">
@@ -154,14 +223,10 @@ export default function TeachersPage() {
                   <CardDescription>{teacher.role}</CardDescription>
                 </div>
                 <Badge
-                  variant={
-                    teacher.status === "Active" ? "default" : "secondary"
-                  }
+                  variant={teacher.status === "Active" ? "default" : "secondary"}
                   className={cn(
-                    teacher.status === "Active" &&
-                      "bg-emerald-100 text-emerald-700 hover:bg-emerald-100",
-                    teacher.status === "On Leave" &&
-                      "bg-amber-100 text-amber-700 hover:bg-amber-100"
+                    teacher.status === "Active" && "bg-emerald-100 text-emerald-700 hover:bg-emerald-100",
+                    teacher.status === "On Leave" && "bg-amber-100 text-amber-700 hover:bg-amber-100"
                   )}
                 >
                   {teacher.status}
@@ -190,6 +255,13 @@ export default function TeachersPage() {
                 </div>
               </div>
 
+              <div className="rounded-md border bg-muted/40 p-2 text-sm">
+                <div className="flex items-center gap-2 font-medium text-foreground">
+                  <IndianRupee className="h-3.5 w-3.5" />
+                  <span>{teacher.salary ? `₹${Number(teacher.salary).toLocaleString("en-IN")}/month` : "Salary not set"}</span>
+                </div>
+              </div>
+
               <div className="border-t pt-3 space-y-1.5">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Mail className="h-3.5 w-3.5" />
@@ -200,11 +272,93 @@ export default function TeachersPage() {
                   <span>{teacher.phone}</span>
                 </div>
               </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => {
+                    setSelectedTeacher({
+                      id: teacher.id,
+                      full_name: teacher.name,
+                      email: teacher.email,
+                      phone: teacher.phone,
+                      role: teacher.role,
+                      branch_id: teacher.branchId,
+                      subjects: teacher.subjects,
+                      experience: teacher.experience,
+                      status: teacher.status,
+                      salary: teacher.salary,
+                    });
+                    setEditOpen(true);
+                  }}
+                >
+                  Edit Details
+                </Button>
+                <Button
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => {
+                    setSalaryTeacher(teacher);
+                    setSalaryMonth(new Date().toISOString().slice(0, 7));
+                    setSalaryOpen(true);
+                  }}
+                >
+                  Pay Salary
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ))}
       </div>
       <AddTeacherSheet open={addOpen} onOpenChange={setAddOpen} onSuccess={() => fetchTeachers()} />
+      <EditTeacherSheet
+        teacher={selectedTeacher}
+        open={editOpen}
+        onOpenChange={(open) => {
+          setEditOpen(open)
+          if (!open) setSelectedTeacher(null)
+        }}
+        onSuccess={() => fetchTeachers()}
+      />
+
+      {salaryOpen && salaryTeacher && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-xl">
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold">Pay Salary</h3>
+                <p className="text-sm text-muted-foreground">Select the month for {salaryTeacher.name}.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="salary-month" className="text-sm font-medium">Salary Month</label>
+                <input
+                  id="salary-month"
+                  type="month"
+                  value={salaryMonth}
+                  onChange={(event) => setSalaryMonth(event.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                Amount: <span className="font-semibold">₹{Number(salaryTeacher.salary ?? 0).toLocaleString("en-IN")}</span>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button type="button" variant="outline" className="flex-1" onClick={() => { setSalaryOpen(false); setSalaryTeacher(null); }}>
+                  Cancel
+                </Button>
+                <Button type="button" className="flex-1" onClick={() => handlePaySalary(salaryTeacher, salaryMonth)}>
+                  Confirm Payment
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

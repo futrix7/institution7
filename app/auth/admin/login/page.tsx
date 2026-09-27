@@ -14,6 +14,7 @@ import { useAuthState } from "@/hooks/use-auth"
 import { resolvePostLoginPath } from "@/lib/auth/roles"
 import { lookupAdmin } from "@/lib/auth/resolve-role"
 import { describeAuthError, describeDbError, type AuthErrorInfo } from "@/lib/errors"
+import { PasswordVisibilityToggle } from "@/components/auth/password-visibility-toggle"
 
 export default function AdminLoginPage() {
   const router = useRouter()
@@ -22,6 +23,7 @@ export default function AdminLoginPage() {
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [passwordVisible, setPasswordVisible] = useState(false)
   const [loading, setLoading] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({})
   const [formError, setFormError] = useState<AuthErrorInfo | null>(null)
@@ -70,6 +72,25 @@ export default function AdminLoginPage() {
     setLoading(true)
 
     try {
+      const bootstrapResponse = await fetch("/api/admin/bootstrap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      })
+      const bootstrapData = await bootstrapResponse.json().catch(() => ({}))
+
+      if (!bootstrapResponse.ok) {
+        const message = bootstrapData.error || "We couldn't prepare admin sign-in. Please try again."
+        const info: AuthErrorInfo = {
+          message,
+          recovery: "contact-support",
+          alreadyRegistered: false,
+        }
+        setFormError(info)
+        toast(message, { variant: "destructive" })
+        return
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
@@ -129,7 +150,7 @@ export default function AdminLoginPage() {
   const disabled = loading || sessionLoading
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/50 px-4 py-12">
+    <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-background via-background to-muted/50 px-4 py-12">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-amber-500/10">
@@ -164,29 +185,27 @@ export default function AdminLoginPage() {
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-                <Link
-                  href="/auth/admin/reset-password"
-                  className="text-xs text-muted-foreground transition-colors hover:text-primary"
-                >
-                  Forgot password?
-                </Link>
-              </div>
+              <Label htmlFor="password">Password</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   id="password"
-                  type="password"
+                  type={passwordVisible ? "text" : "password"}
                   autoComplete="current-password"
                   placeholder="Enter your password"
                   aria-invalid={Boolean(fieldErrors.password)}
-                  className="h-10 pl-10"
+                  className="h-10 pl-10 pr-10"
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value)
                     if (fieldErrors.password) setFieldErrors((f) => ({ ...f, password: undefined }))
                   }}
+                  disabled={disabled}
+                />
+                <PasswordVisibilityToggle
+                  visible={passwordVisible}
+                  label="password"
+                  onToggle={() => setPasswordVisible((visible) => !visible)}
                   disabled={disabled}
                 />
               </div>
@@ -201,14 +220,6 @@ export default function AdminLoginPage() {
                 <AlertCircle className="mt-0.5 size-4 shrink-0" />
                 <div className="space-y-1">
                   <p>{formError.message}</p>
-                  {formError.recovery === "reset" && (
-                    <Link
-                      href={`/auth/admin/reset-password?email=${encodeURIComponent(email.trim())}`}
-                      className="inline-block font-medium underline underline-offset-2"
-                    >
-                      Reset your password
-                    </Link>
-                  )}
                 </div>
               </div>
             )}

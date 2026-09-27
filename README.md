@@ -109,8 +109,8 @@ The ones that will bite you if unset:
 
 | Variable | If unset |
 | --- | --- |
-| `SUPABASE_SERVICE_ROLE_KEY` | Rate limiting, password reset and all registration return 503 |
-| `ADMIN_REG_CODE` | Admin registration returns 503 — **no admin account can be created** |
+| `SUPABASE_SERVICE_ROLE_KEY` | Rate limiting, password reset and admin account provisioning return 503 |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Admin sign-in is unavailable; set both in `.env.local` to provision the single admin account |
 | `FINANCE_PIN` | The finance dashboard gate returns 503 |
 
 ## How authorization works
@@ -156,8 +156,8 @@ instead of recursing. It is used by every admin policy, by `resolveRole()`, and 
 | --- | --- | --- |
 | Student sign-up | `/auth/user/register` → `/api/register` | Four steps: details, courses, payment, review. One server-side transaction: auth user + student + per-course fees/installments + pending payment. The student picks which of the three installments to settle, or all of them. Priced from `courses.fee_numeric`, not the client |
 | Student sign-in | `/auth/user/login` | |
-| Admin sign-up | `/auth/admin/register` → `/api/admin/register` | Invite code only. There is no OAuth or self-service path |
-| Password reset | `/auth/*/reset-password` → `/api/reset-password` | Email + new password, then all sessions are revoked. **No ownership proof — see Known limitations** |
+| Admin sign-in | `/auth/admin/login` → `/api/admin/bootstrap` | `ADMIN_EMAIL` and `ADMIN_PASSWORD` are server-only. The first sign-in creates the Supabase Auth user and `admins` row; subsequent sign-ins sync the configured password before creating a normal Supabase session. Set `ADMIN_NAME` optionally. |
+| Student password reset | `/auth/user/reset-password` → `/api/reset-password` | Email + new password, then all sessions are revoked. **No ownership proof — see Known limitations** |
 | Finance gate | `/admin/finanace` → `/api/verify-pin` | Admin session verified server-side, then the PIN. 5 attempts / 15 min |
 
 `FINANCE_PIN` is a single shared plaintext value, not a per-admin second factor.
@@ -215,8 +215,7 @@ endpoint requires a real admin session first and rate-limits per admin.
 A course fee is not one charge. `create_fee_schedule()` splits it into three
 installments — `Installment 1`, `Installment 2`, `Installment 3` — with the first
 two taking the floor of a third and the last absorbing the remainder, so the parts
-always sum to the fee exactly. A fourth or fifth part can be added by an admin
-through `replace_installment_plan()`, but only while nothing is claimed or paid.
+always sum to the fee exactly.
 
 Nothing in the browser can mark an installment paid, and that is the point. The
 chain is:

@@ -195,6 +195,10 @@ CREATE TABLE IF NOT EXISTS fee_installments (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE fee_installments DROP CONSTRAINT IF EXISTS fee_installments_status_check;
+ALTER TABLE fee_installments ADD CONSTRAINT fee_installments_status_check
+  CHECK (status IN ('Paid', 'Pending', 'Partial'));
+
 CREATE TABLE IF NOT EXISTS fee_extras (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   fee_id      UUID REFERENCES fees(id) ON DELETE CASCADE,
@@ -334,6 +338,9 @@ CREATE TABLE IF NOT EXISTS rate_limit_log (
   scope       TEXT NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+COMMENT ON TABLE public.rate_limit_log IS
+  'Throttling log for finance PIN and installment payment submission; authentication routes do not use it.';
 
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS branch_id TEXT REFERENCES branches(id) ON DELETE SET NULL;
 
@@ -578,6 +585,11 @@ COMMENT ON FUNCTION public.create_fee_schedule(uuid, numeric, integer, date) IS
 
 REVOKE ALL ON FUNCTION public.create_fee_schedule(uuid, numeric, integer, date) FROM PUBLIC;
 
+DROP FUNCTION IF EXISTS public.register_student(
+  uuid, text, text, text, text, text, text, text[], text, text, text, text,
+  integer[], integer
+);
+
 CREATE OR REPLACE FUNCTION public.register_student(
   p_user_id uuid,
   p_full_name text,
@@ -592,7 +604,8 @@ CREATE OR REPLACE FUNCTION public.register_student(
   p_payment_method text,
   p_payment_description text,
   p_paid_installment_nos integer[] DEFAULT ARRAY[1]::integer[],
-  p_installment_count integer DEFAULT 3
+  p_installment_count integer DEFAULT 3,
+  p_custom_payment_amount numeric DEFAULT NULL
 )
 RETURNS TABLE (student_id text, payment_id text, total_fee numeric)
 LANGUAGE plpgsql
@@ -612,7 +625,8 @@ DECLARE
   v_total numeric := 0;
   v_primary_course text;
   v_count integer := COALESCE(p_installment_count, 3);
-  v_paid numeric := 0;
+  v_custom_remaining numeric;
+  v_payment_amount numeric;
   v_sched record;
   v_inst record;
   v_no integer;
@@ -654,8 +668,15 @@ BEGIN
     PERFORM * FROM public.create_fee_schedule(v_fee_row, v_course_fee, v_count, v_today);
   END LOOP;
 
-  IF COALESCE(p_paid_installment_nos, ARRAY[1]::integer[]) IS NOT NULL
-     AND array_length(p_paid_installment_nos, 1) IS NOT NULL THEN
+    IF p_custom_payment_amount IS NOT NULL
+      AND (p_custom_payment_amount <= 0 OR p_custom_payment_amount > v_total) THEN
+     RAISE EXCEPTION 'custom payment must be greater than zero and no more than the total fee'
+      USING ERRCODE = '22023';
+    END IF;
+
+    IF p_custom_payment_amount IS NOT NULL
+      OR (COALESCE(p_paid_installment_nos, ARRAY[1]::integer[]) IS NOT NULL
+        AND array_length(p_paid_installment_nos, 1) IS NOT NULL) THEN
     v_receipt := public.next_payment_code(v_year);
   END IF;
 
@@ -667,40 +688,75 @@ BEGIN
          )
     INTO v_nos;
 
-  FOREACH v_course IN ARRAY p_course_slugs LOOP
-    SELECT f.id INTO v_fee_row FROM fees f
-     WHERE f.student_id = v_student_id AND f.course_slug = v_course
-     LIMIT 1;
+  IF p_custom_payment_amount IS NOT NULL THEN
+    v_custom_remaining := p_custom_payment_amount;
 
-    IF v_fee_row IS NULL THEN
-      CONTINUE;
-    END IF;
-
-    FOREACH v_no IN ARRAY v_nos LOOP
-      SELECT fi.id, fi.amount INTO v_inst FROM fee_installments fi
-       WHERE fi.fee_id = v_fee_row AND fi.installment_no = v_no
+    FOREACH v_course IN ARRAY p_course_slugs LOOP
+      SELECT f.id INTO v_fee_row FROM fees f
+       WHERE f.student_id = v_student_id AND f.course_slug = v_course
        LIMIT 1;
 
-      IF v_inst.id IS NULL THEN
+      FOR v_inst IN
+        SELECT fi.id, fi.amount
+          FROM fee_installments fi
+         WHERE fi.fee_id = v_fee_row
+           AND fi.amount > 0
+         ORDER BY fi.installment_no
+      LOOP
+        EXIT WHEN v_custom_remaining <= 0;
+        v_payment_amount := LEAST(v_inst.amount, v_custom_remaining);
+        v_payment_id := public.next_payment_code(v_year);
+
+        INSERT INTO payments (
+          id, student_id, student_name, course_slug, amount, payment_date,
+          method, status, description, branch_id, installment_id, receipt_no
+        ) VALUES (
+          v_payment_id, v_student_id, p_full_name, v_course, v_payment_amount, v_today,
+          COALESCE(NULLIF(p_payment_method, ''), 'upi'), 'Pending',
+          p_payment_description,
+          NULLIF(p_branch_id, ''),
+          v_inst.id,
+          v_receipt
+        );
+
+        v_custom_remaining := v_custom_remaining - v_payment_amount;
+      END LOOP;
+    END LOOP;
+  ELSE
+    FOREACH v_course IN ARRAY p_course_slugs LOOP
+      SELECT f.id INTO v_fee_row FROM fees f
+       WHERE f.student_id = v_student_id AND f.course_slug = v_course
+       LIMIT 1;
+
+      IF v_fee_row IS NULL THEN
         CONTINUE;
       END IF;
 
-      v_payment_id := public.next_payment_code(v_year);
-      v_paid := v_paid + v_inst.amount;
+      FOREACH v_no IN ARRAY v_nos LOOP
+        SELECT fi.id, fi.amount INTO v_inst FROM fee_installments fi
+         WHERE fi.fee_id = v_fee_row AND fi.installment_no = v_no
+         LIMIT 1;
 
-      INSERT INTO payments (
-        id, student_id, student_name, course_slug, amount, payment_date,
-        method, status, description, branch_id, installment_id, receipt_no
-      ) VALUES (
-        v_payment_id, v_student_id, p_full_name, v_course, v_inst.amount, v_today,
-        COALESCE(NULLIF(p_payment_method, ''), 'upi'), 'Pending',
-        p_payment_description,
-        NULLIF(p_branch_id, ''),
-        v_inst.id,
-        v_receipt
-      );
+        IF v_inst.id IS NULL THEN
+          CONTINUE;
+        END IF;
+
+        v_payment_id := public.next_payment_code(v_year);
+
+        INSERT INTO payments (
+          id, student_id, student_name, course_slug, amount, payment_date,
+          method, status, description, branch_id, installment_id, receipt_no
+        ) VALUES (
+          v_payment_id, v_student_id, p_full_name, v_course, v_inst.amount, v_today,
+          COALESCE(NULLIF(p_payment_method, ''), 'upi'), 'Pending',
+          p_payment_description,
+          NULLIF(p_branch_id, ''),
+          v_inst.id,
+          v_receipt
+        );
+      END LOOP;
     END LOOP;
-  END LOOP;
+  END IF;
 
   RETURN QUERY SELECT v_student_id, v_payment_id, v_total;
 END;
@@ -708,24 +764,83 @@ $$;
 
 COMMENT ON FUNCTION public.register_student(
   uuid, text, text, text, text, text, text, text[], text, text, text, text,
-  integer[], integer
+  integer[], integer, numeric
 ) IS
-  'Creates a student, one fee row and a multi-installment schedule per course, and one Pending payment per installment being settled at registration. Prices courses from courses.fee_numeric. service_role only.';
+  'Creates a student, fee rows and schedules, and Pending payment claims for chosen installments or a custom amount allocated across the schedule. Prices courses from courses.fee_numeric. service_role only.';
 
 REVOKE ALL ON FUNCTION public.register_student(
   uuid, text, text, text, text, text, text, text[], text, text, text, text,
-  integer[], integer
+  integer[], integer, numeric
 ) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION public.register_student(
   uuid, text, text, text, text, text, text, text[], text, text, text, text,
-  integer[], integer
+  integer[], integer, numeric
 ) TO service_role;
 
 ALTER FUNCTION public.register_student(
   uuid, text, text, text, text, text, text, text[], text, text, text, text,
-  integer[], integer
+  integer[], integer, numeric
 ) OWNER TO postgres;
+
+CREATE OR REPLACE FUNCTION public.enroll_student_in_course(
+  p_user_id uuid,
+  p_course_slug text
+)
+RETURNS TABLE (fee_id uuid, course_slug text, total_fee numeric)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_student students%ROWTYPE;
+  v_course courses%ROWTYPE;
+  v_fee_id uuid;
+BEGIN
+  SELECT * INTO v_student
+    FROM students
+   WHERE user_id = p_user_id
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'no student record is linked to this account' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT * INTO v_course
+    FROM courses
+   WHERE slug = p_course_slug AND status = 'active';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'course is not available for enrollment' USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM fees f
+     WHERE f.student_id = v_student.id AND f.course_slug = v_course.slug
+  ) THEN
+    RAISE EXCEPTION 'already enrolled in this course' USING ERRCODE = '22023';
+  END IF;
+
+  INSERT INTO fees (student_id, course_slug, total_fee, paid_amount, pending_amount)
+  VALUES (v_student.id, v_course.slug, v_course.fee_numeric, 0, v_course.fee_numeric)
+  RETURNING id INTO v_fee_id;
+
+  PERFORM * FROM public.create_fee_schedule(v_fee_id, v_course.fee_numeric, 3, CURRENT_DATE);
+
+  fee_id := v_fee_id;
+  course_slug := v_course.slug;
+  total_fee := v_course.fee_numeric;
+  RETURN NEXT;
+END;
+$$;
+
+COMMENT ON FUNCTION public.enroll_student_in_course(uuid, text) IS
+  'Adds an active course to an existing student and creates its fee plus three-installment schedule atomically. service_role only.';
+
+REVOKE ALL ON FUNCTION public.enroll_student_in_course(uuid, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.enroll_student_in_course(uuid, text) TO service_role;
+ALTER FUNCTION public.enroll_student_in_course(uuid, text) OWNER TO postgres;
 
 CREATE OR REPLACE FUNCTION public.guard_student_columns()
 RETURNS trigger
@@ -891,6 +1006,8 @@ DECLARE
   v_id uuid;
   v_total numeric := 0;
   v_group text;
+  v_paid numeric;
+  v_balance numeric;
 BEGIN
   SELECT * INTO v_student FROM students WHERE user_id = p_user_id;
 
@@ -902,8 +1019,12 @@ BEGIN
     RAISE EXCEPTION 'choose at least one installment' USING ERRCODE = '22023';
   END IF;
 
-  IF NOT COALESCE(p_pay_all, false) AND array_length(p_installment_ids, 1) > 3 THEN
-    RAISE EXCEPTION 'at most three installments can be paid in one go' USING ERRCODE = '22023';
+  IF NOT COALESCE(p_pay_all, false) AND (
+    SELECT COUNT(DISTINCT fi.installment_no)
+      FROM fee_installments fi
+     WHERE fi.id = ANY(p_installment_ids)
+  ) > 3 THEN
+    RAISE EXCEPTION 'at most three installment numbers can be paid in one go' USING ERRCODE = '22023';
   END IF;
 
   v_group := public.next_payment_code(EXTRACT(YEAR FROM CURRENT_DATE)::integer);
@@ -925,6 +1046,15 @@ BEGIN
       RAISE EXCEPTION '% has already been paid', v_inst.label USING ERRCODE = '22023';
     END IF;
 
+    SELECT COALESCE(SUM(p.amount), 0) INTO v_paid
+      FROM payments p
+     WHERE p.installment_id = v_inst.id AND p.status = 'Paid';
+    v_balance := GREATEST(v_inst.amount - v_paid, 0);
+
+    IF v_balance <= 0 THEN
+      RAISE EXCEPTION '% has already been paid', v_inst.label USING ERRCODE = '22023';
+    END IF;
+
     IF EXISTS (
       SELECT 1 FROM payments
        WHERE installment_id = v_inst.id AND status = 'Pending'
@@ -932,7 +1062,7 @@ BEGIN
       RAISE EXCEPTION '% is already awaiting verification', v_inst.label USING ERRCODE = '22023';
     END IF;
 
-    v_total := v_total + v_inst.amount;
+    v_total := v_total + v_balance;
 
     INSERT INTO payments (
       id, student_id, student_name, course_slug, amount, payment_date,
@@ -942,7 +1072,7 @@ BEGIN
            v_student.id,
            v_student.full_name,
            f.course_slug,
-           v_inst.amount,
+           v_balance,
            CURRENT_DATE,
            COALESCE(NULLIF(p_method, ''), 'upi'),
            'Pending',
@@ -955,7 +1085,7 @@ BEGIN
     RETURNING id INTO payment_id;
 
     installment_label := v_inst.label;
-    amount := v_inst.amount;
+    amount := v_balance;
     RETURN NEXT;
   END LOOP;
 END;
@@ -982,6 +1112,7 @@ DECLARE
   v_pay payments%ROWTYPE;
   v_pid text;
   v_total numeric := 0;
+  v_installment_paid numeric;
   v_note text;
 BEGIN
   IF p_payment_ids IS NULL OR array_length(p_payment_ids, 1) IS NULL THEN
@@ -991,7 +1122,7 @@ BEGIN
   v_note := trim(COALESCE(p_note, ''));
 
   FOREACH v_pid IN ARRAY p_payment_ids LOOP
-    SELECT * INTO v_pay FROM payments WHERE id = p_pid FOR UPDATE;
+    SELECT * INTO v_pay FROM payments WHERE id = v_pid FOR UPDATE;
 
     IF NOT FOUND THEN
       RAISE EXCEPTION 'payment % does not exist', v_pid USING ERRCODE = '22023';
@@ -1013,19 +1144,28 @@ BEGIN
        WHERE id = v_pid;
 
       IF v_pay.installment_id IS NOT NULL THEN
-        UPDATE fee_installments
-           SET status = 'Paid', paid_date = CURRENT_DATE, verified_at = NOW()
-         WHERE id = v_pay.installment_id;
+        SELECT COALESCE(SUM(p.amount), 0) INTO v_installment_paid
+          FROM payments p
+         WHERE p.installment_id = v_pay.installment_id AND p.status = 'Paid';
+
+        UPDATE fee_installments fi
+           SET status = CASE
+                 WHEN v_installment_paid >= fi.amount THEN 'Paid'
+                 ELSE 'Partial'
+               END,
+               paid_date = CURRENT_DATE,
+               verified_at = NOW()
+         WHERE fi.id = v_pay.installment_id;
 
         PERFORM public.apply_fee_delta(
-          (SELECT fee_id FROM fee_installments WHERE id = v_pay.installment_id),
+          (SELECT fi.fee_id FROM fee_installments fi WHERE fi.id = v_pay.installment_id),
           v_pay.amount,
           -v_pay.amount
         );
 
         v_total := v_total + v_pay.amount;
         installment_id := v_pay.installment_id;
-        fee_id := (SELECT fee_id FROM fee_installments WHERE id = v_pay.installment_id);
+        fee_id := (SELECT fi.fee_id FROM fee_installments fi WHERE fi.id = v_pay.installment_id);
         amount := v_pay.amount;
         student_id := v_pay.student_id;
         RETURN NEXT;
@@ -1067,6 +1207,8 @@ DECLARE
   v_fee fees%ROWTYPE;
   v_stud students%ROWTYPE;
   v_pid text;
+  v_paid_sum numeric;
+  v_balance numeric;
 BEGIN
   SELECT * INTO v_inst FROM fee_installments WHERE id = p_installment_id FOR UPDATE;
 
@@ -1075,6 +1217,21 @@ BEGIN
   END IF;
 
   IF v_inst.status = 'Paid' THEN
+    RAISE EXCEPTION '% has already been paid', v_inst.label USING ERRCODE = '22023';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM payments WHERE installment_id = v_inst.id AND status = 'Pending'
+  ) THEN
+    RAISE EXCEPTION '% has a student payment awaiting review. Approve or reject it in Payments first',
+      v_inst.label USING ERRCODE = '22023';
+  END IF;
+
+  SELECT COALESCE(SUM(p.amount), 0) INTO v_paid_sum
+    FROM payments p WHERE p.installment_id = v_inst.id AND p.status = 'Paid';
+  v_balance := GREATEST(v_inst.amount - v_paid_sum, 0);
+
+  IF v_balance <= 0 THEN
     RAISE EXCEPTION '% has already been paid', v_inst.label USING ERRCODE = '22023';
   END IF;
 
@@ -1088,7 +1245,7 @@ BEGIN
     method, status, description, branch_id, installment_id, receipt_no,
     verified_at, verified_by
   ) VALUES (
-    v_pid, v_fee.student_id, v_stud.full_name, v_fee.course_slug, v_inst.amount,
+    v_pid, v_fee.student_id, v_stud.full_name, v_fee.course_slug, v_balance,
     CURRENT_DATE, COALESCE(NULLIF(p_method, ''), 'cash'), 'Paid',
     COALESCE(
       NULLIF(p_reference, ''),
@@ -1101,10 +1258,10 @@ BEGIN
      SET status = 'Paid', paid_date = CURRENT_DATE, verified_at = NOW()
    WHERE id = v_inst.id;
 
-  PERFORM public.apply_fee_delta(v_inst.fee_id, v_inst.amount, -v_inst.amount);
+  PERFORM public.apply_fee_delta(v_inst.fee_id, v_balance, -v_balance);
 
   payment_id := v_pid;
-  amount := v_inst.amount;
+  amount := v_balance;
   RETURN NEXT;
 END;
 $$;
@@ -1136,13 +1293,13 @@ BEGIN
     RAISE EXCEPTION 'installment does not exist' USING ERRCODE = '22023';
   END IF;
 
-  IF v_inst.status <> 'Paid' THEN
-    RAISE EXCEPTION '% is not marked as paid', v_inst.label USING ERRCODE = '22023';
+  IF v_inst.status NOT IN ('Paid', 'Partial') THEN
+    RAISE EXCEPTION '% has no verified payment to reverse', v_inst.label USING ERRCODE = '22023';
   END IF;
 
-  SELECT COALESCE(SUM(amount), 0) INTO v_paid_sum
-    FROM payments
-   WHERE installment_id = v_inst.id AND status = 'Paid';
+  SELECT COALESCE(SUM(p.amount), 0) INTO v_paid_sum
+    FROM payments p
+   WHERE p.installment_id = v_inst.id AND p.status = 'Paid';
 
   UPDATE payments
      SET status      = 'Rejected',
@@ -1175,54 +1332,7 @@ COMMENT ON FUNCTION public.unmark_installment(uuid, text, text) IS
 
 REVOKE ALL ON FUNCTION public.unmark_installment(uuid, text, text) FROM PUBLIC;
 
-CREATE OR REPLACE FUNCTION public.replace_installment_plan(
-  p_fee_id uuid,
-  p_count integer
-)
-RETURNS TABLE (created integer)
-LANGUAGE plpgsql
-VOLATILE
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_fee fees%ROWTYPE;
-  v_claimed integer;
-BEGIN
-  SELECT * INTO v_fee FROM fees WHERE id = p_fee_id FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'fee record does not exist' USING ERRCODE = '22023';
-  END IF;
-
-  SELECT COUNT(*) INTO v_claimed
-    FROM fee_installments fi
-    LEFT JOIN payments p ON p.installment_id = fi.id
-   WHERE fi.fee_id = p_fee_id AND (fi.status = 'Paid' OR p.id IS NOT NULL);
-
-  IF v_claimed > 0 THEN
-    RAISE EXCEPTION 'this fee already has a payment against it and cannot be rescheduled'
-      USING ERRCODE = '22023';
-  END IF;
-
-  DELETE FROM fee_installments WHERE fee_id = p_fee_id;
-
-  PERFORM * FROM public.create_fee_schedule(
-    p_fee_id,
-    COALESCE(v_fee.total_fee, 0) - COALESCE(v_fee.paid_amount, 0),
-    p_count,
-    CURRENT_DATE
-  );
-
-  created := p_count;
-  RETURN NEXT;
-END;
-$$;
-
-COMMENT ON FUNCTION public.replace_installment_plan(uuid, integer) IS
-  'Rebuilds a course fee schedule. Refuses if any installment is paid or claimed. service_role only.';
-
-REVOKE ALL ON FUNCTION public.replace_installment_plan(uuid, integer) FROM PUBLIC;
+DROP FUNCTION IF EXISTS public.replace_installment_plan(uuid, integer);
 
 GRANT EXECUTE ON FUNCTION public.create_fee_schedule(uuid, numeric, integer, date)
   TO service_role;
@@ -1236,8 +1346,6 @@ GRANT EXECUTE ON FUNCTION public.mark_installment_paid(uuid, text, text)
   TO service_role;
 GRANT EXECUTE ON FUNCTION public.unmark_installment(uuid, text, text)
   TO service_role;
-GRANT EXECUTE ON FUNCTION public.replace_installment_plan(uuid, integer)
-  TO service_role;
 
 ALTER FUNCTION public.create_fee_schedule(uuid, numeric, integer, date)            OWNER TO postgres;
 ALTER FUNCTION public.apply_fee_delta(uuid, numeric, numeric)                     OWNER TO postgres;
@@ -1245,7 +1353,6 @@ ALTER FUNCTION public.submit_installment_payments(uuid, uuid[], text, text, bool
 ALTER FUNCTION public.verify_installment_payments(text[], boolean, text, text)      OWNER TO postgres;
 ALTER FUNCTION public.mark_installment_paid(uuid, text, text)                      OWNER TO postgres;
 ALTER FUNCTION public.unmark_installment(uuid, text, text) OWNER TO postgres;
-ALTER FUNCTION public.replace_installment_plan(uuid, integer)                      OWNER TO postgres;
 
 DO $$
 DECLARE
@@ -1398,7 +1505,39 @@ CREATE POLICY "Admins full access" ON attendance FOR ALL TO authenticated
 CREATE POLICY "Students read own certificates" ON certificates FOR SELECT TO authenticated
   USING (student_id = public.current_student_id());
 CREATE POLICY "Students request own certificates" ON certificates FOR INSERT TO authenticated
-  WITH CHECK (student_id = public.current_student_id());
+  WITH CHECK (
+    student_id = public.current_student_id()
+    AND certificates.course_slug IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM fees f
+       WHERE f.student_id = public.current_student_id()
+         AND f.course_slug = certificates.course_slug
+    )
+    AND NOT EXISTS (
+      SELECT 1
+        FROM fees f
+       WHERE f.student_id = public.current_student_id()
+         AND f.course_slug = certificates.course_slug
+         AND (
+           COALESCE(f.pending_amount, 0) > 0
+           OR NOT EXISTS (
+             SELECT 1 FROM fee_installments fi WHERE fi.fee_id = f.id
+           )
+           OR EXISTS (
+             SELECT 1
+               FROM fee_installments fi
+              WHERE fi.fee_id = f.id AND fi.status <> 'Paid'
+           )
+         )
+    )
+    AND NOT EXISTS (
+      SELECT 1
+        FROM certificates c
+       WHERE c.student_id = public.current_student_id()
+         AND c.course_slug = certificates.course_slug
+         AND c.status IN ('Issued', 'Requested', 'Processing', 'Pending')
+    )
+  );
 CREATE POLICY "Admins full access" ON certificates FOR ALL TO authenticated
   USING (public.is_admin()) WITH CHECK (public.is_admin());
 
@@ -1422,3 +1561,5 @@ BEGIN
 
   RAISE NOTICE 'Row level security check passed: no anon write policies.';
 END $$;
+
+NOTIFY pgrst, 'reload schema';

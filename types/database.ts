@@ -413,6 +413,7 @@ export interface Database {
           receipt_no: string | null
           description: string | null
           branch_id: string | null
+          installment_id: string | null
           created_at: string
         }
         Insert: {
@@ -427,6 +428,7 @@ export interface Database {
           receipt_no?: string | null
           description?: string | null
           branch_id?: string | null
+          installment_id?: string | null
           created_at?: string
         }
         Update: {
@@ -441,6 +443,7 @@ export interface Database {
           receipt_no?: string | null
           description?: string | null
           branch_id?: string | null
+          installment_id?: string | null
           created_at?: string
         }
       }
@@ -773,6 +776,17 @@ export interface Database {
         Returns: {
           student_id: string
           payment_id: string
+          total_fee: number
+        }[]
+      }
+      enroll_student_in_course: {
+        Args: {
+          p_user_id: string
+          p_course_slug: string
+        }
+        Returns: {
+          fee_id: string
+          course_slug: string
           total_fee: number
         }[]
       }

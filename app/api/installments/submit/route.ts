@@ -22,8 +22,8 @@ const UUID_PATTERN =
  * which is how a student could mark themselves paid from a browser. The balance
  * moves in verify_installment_payments(), which only an admin can reach.
  *
- * The three-installment cap is enforced in the RPC as well, not just here, so a
- * crafted request cannot file an unbounded claim. "Pay all remaining" is not a
+ * The three-installment-position cap is enforced in the RPC by installment
+ * number, so a multi-course selection can include one row per course. "Pay all remaining" is not a
  * special case here — it is simply a longer id list, and it is deliberately
  * allowed to exceed three, because refusing to settle a student's whole
  * outstanding balance in one go is the opposite of what the button says it does.
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
       .from("fee_installments")
       .select("id, fee_id, status, fees!inner(student_id)")
       .eq("fees.student_id", auth.studentId)
-      .eq("status", "Pending")
+      .in("status", ["Pending", "Partial"])
 
     if (error) {
       console.error("[installments/submit] outstanding lookup failed:", error.message)
@@ -116,13 +116,6 @@ export async function POST(request: Request) {
   if (installmentIds.length === 0) {
     return NextResponse.json(
       { error: "Choose at least one installment to pay." },
-      { status: 400 }
-    )
-  }
-
-  if (!payAll && installmentIds.length > 3) {
-    return NextResponse.json(
-      { error: "You can pay up to three installments at a time. Use 'Pay all remaining' to settle everything at once." },
       { status: 400 }
     )
   }
@@ -188,7 +181,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      count: rows.length,
+      count: new Set(rows.map((row) => row.label)).size,
       amount: total,
       // Named explicitly because "awaiting verification" is the state the whole
       // flow now rests on, and the student must not read a filed claim as a

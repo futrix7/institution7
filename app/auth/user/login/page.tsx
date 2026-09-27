@@ -12,6 +12,11 @@ import { supabase } from "@/lib/supabase"
 import { useToast } from "@/components/ui/sonner"
 import { useAuthRole, useAuthState, ROLE_HOME, resolvePostLoginPath } from "@/hooks/use-auth"
 import { describeAuthError, type AuthErrorInfo } from "@/lib/errors"
+import {
+  readStudentRegistrationDraft,
+  type StudentRegistrationDraft,
+} from "@/lib/auth/student-registration-draft"
+import { PasswordVisibilityToggle } from "@/components/auth/password-visibility-toggle"
 
 export default function UserLoginPage() {
   const router = useRouter()
@@ -24,9 +29,11 @@ export default function UserLoginPage() {
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [passwordVisible, setPasswordVisible] = useState(false)
   const [loading, setLoading] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({})
   const [formError, setFormError] = useState<AuthErrorInfo | null>(null)
+  const [pendingRegistrationDraft, setPendingRegistrationDraft] = useState<StudentRegistrationDraft | null>(null)
 
   // Read at the point of use rather than mirrored into state: the search params
   // never change while the page is mounted, and syncing them would cost an
@@ -36,8 +43,10 @@ export default function UserLoginPage() {
   // Prefill the email when arriving from the register page.
   useEffect(() => {
     const prefill = new URLSearchParams(window.location.search).get("email")
+    const draft = readStudentRegistrationDraft()
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (prefill) setEmail(prefill)
+    setPendingRegistrationDraft(draft)
+    if (prefill || draft?.email) setEmail(prefill || draft?.email || "")
   }, [])
 
   // Only students belong here. Resolve the role first so an admin or a
@@ -117,12 +126,15 @@ export default function UserLoginPage() {
   }
 
   const disabled = loading || sessionLoading
+  const matchingDraft = pendingRegistrationDraft?.email.toLowerCase() === email.trim().toLowerCase()
+    ? pendingRegistrationDraft
+    : null
 
   // Already signed in, but not as a student. Show where to go instead of
   // redirecting to a dashboard whose guard would only bounce them back.
   if (isAuthenticated && !roleLoading && accountRole === "admin") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/50 px-4 py-12">
+      <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-background via-background to-muted/50 px-4 py-12">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-amber-500/10">
@@ -157,7 +169,7 @@ export default function UserLoginPage() {
 
   if (isAuthenticated && !roleLoading && accountRole === "none") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/50 px-4 py-12">
+      <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-background via-background to-muted/50 px-4 py-12">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-amber-500/10">
@@ -189,7 +201,7 @@ export default function UserLoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/50 px-4 py-12">
+    <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-background via-background to-muted/50 px-4 py-12">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary/10">
@@ -200,6 +212,21 @@ export default function UserLoginPage() {
         </CardHeader>
 
         <CardContent>
+          {matchingDraft && (
+            <div role="status" className="mb-4 space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
+              <p className="font-semibold">Unfinished registration found</p>
+              <p className="text-muted-foreground">
+                {matchingDraft.fullName || matchingDraft.email}
+                {matchingDraft.selectedCourseSlugs.length > 0 &&
+                  ` · ${matchingDraft.selectedCourseSlugs.length} course${matchingDraft.selectedCourseSlugs.length === 1 ? "" : "s"} selected`}
+                . Your details are saved on this device; your password is not saved.
+              </p>
+              <Link href="/auth/user/register" className="inline-block font-medium text-primary hover:underline">
+                Resume registration
+              </Link>
+            </div>
+          )}
+
           <form className="space-y-4" onSubmit={handleLogin} noValidate>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -241,16 +268,22 @@ export default function UserLoginPage() {
                 <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   id="password"
-                  type="password"
+                  type={passwordVisible ? "text" : "password"}
                   autoComplete="current-password"
                   placeholder="Enter your password"
                   aria-invalid={Boolean(fieldErrors.password)}
-                  className="h-10 pl-10"
+                  className="h-10 pl-10 pr-10"
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value)
                     if (fieldErrors.password) setFieldErrors((f) => ({ ...f, password: undefined }))
                   }}
+                  disabled={disabled}
+                />
+                <PasswordVisibilityToggle
+                  visible={passwordVisible}
+                  label="password"
+                  onToggle={() => setPasswordVisible((visible) => !visible)}
                   disabled={disabled}
                 />
               </div>

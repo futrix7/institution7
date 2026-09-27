@@ -50,6 +50,15 @@ function getMonthKey(date: Date): string {
   return `${date.getFullYear()}-${date.getMonth()}`;
 }
 
+function getSafeRows<T>(result: { data: T[] | null; error: { message?: string } | null }, label: string): T[] {
+  if (result.error) {
+    console.error(`[admin dashboard] ${label} query failed:`, result.error.message || result.error);
+    return [];
+  }
+
+  return result.data ?? [];
+}
+
 const STATUS_MAP: Record<string, string> = {
   Active: "confirmed",
   Pending: "pending",
@@ -100,13 +109,13 @@ export default function AdminDashboardPage() {
         supabase.from("branches").select("id, name"),
       ]);
 
-      const students = studentsRes.data || [];
-      const courses = coursesRes.data || [];
-      const attendance = attendanceRes.data || [];
-      const payments = paymentsRes.data || [];
-      const events = eventsRes.data || [];
-      const tasks = tasksRes.data || [];
-      const branches = branchesRes.data || [];
+      const students = getSafeRows(studentsRes, "students");
+      const courses = getSafeRows(coursesRes, "courses");
+      const attendance = getSafeRows(attendanceRes, "attendance");
+      const payments = getSafeRows(paymentsRes, "payments");
+      const events = getSafeRows(eventsRes, "events");
+      const tasks = getSafeRows(tasksRes, "pending_tasks");
+      const branches = getSafeRows(branchesRes, "branches");
 
       const branchMap = new Map(branches.map((b) => [b.id, b.name]));
       const courseMap = new Map(courses.map((c) => [c.slug, c.name]));
@@ -370,26 +379,32 @@ export default function AdminDashboardPage() {
             <CardDescription className="text-xs">Revenue contribution (in ₹L)</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
-                <Pie
-                  data={branchRevenue}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={45}
-                  outerRadius={75}
-                  paddingAngle={3}
-                  dataKey="revenue"
-                  nameKey="branch"
-                  label={({ name, value }) => `${name}: ₹${value}L`}
-                >
-                  {branchRevenue.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={tooltipStyle} />
-              </PieChart>
-            </ResponsiveContainer>
+            {branchRevenue.length === 0 ? (
+              <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+                No revenue data yet
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie
+                    data={branchRevenue}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={45}
+                    outerRadius={75}
+                    paddingAngle={3}
+                    dataKey="revenue"
+                    nameKey="branch"
+                    label={({ name, value }) => `${name}: ₹${value}L`}
+                  >
+                    {branchRevenue.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={tooltipStyle} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -403,15 +418,21 @@ export default function AdminDashboardPage() {
             <CardDescription className="text-xs">Avg attendance by day</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={weeklyAttendance}>
-                <CartesianGrid {...gridStyle} />
-                <XAxis dataKey="day" tick={axisStyle} />
-                <YAxis domain={[0, 100]} tick={axisStyle} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="rate" name="Attendance %" fill="#10b981" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {weeklyAttendance.length === 0 ? (
+              <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+                No attendance data yet
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={weeklyAttendance}>
+                  <CartesianGrid {...gridStyle} />
+                  <XAxis dataKey="day" tick={axisStyle} />
+                  <YAxis domain={[0, 100]} tick={axisStyle} />
+                  <Tooltip contentStyle={tooltipStyle} />
+                  <Bar dataKey="rate" name="Attendance %" fill="#10b981" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -425,19 +446,25 @@ export default function AdminDashboardPage() {
             <CardDescription className="text-xs">Next scheduled activities</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {upcomingEvents.map((event) => (
-                <div key={event.event} className="flex items-center gap-3">
-                  <div className={cn("rounded-md px-2 py-1 text-xs font-medium", eventColors[event.type])}>
-                    {event.type}
+            {upcomingEvents.length === 0 ? (
+              <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
+                No upcoming events
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {upcomingEvents.map((event) => (
+                  <div key={`${event.event}-${event.date}`} className="flex items-center gap-3">
+                    <div className={cn("rounded-md px-2 py-1 text-xs font-medium", eventColors[event.type])}>
+                      {event.type}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{event.event}</p>
+                      <p className="text-xs text-muted-foreground">{event.date}</p>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{event.event}</p>
-                    <p className="text-xs text-muted-foreground">{event.date}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -454,59 +481,65 @@ export default function AdminDashboardPage() {
                 </CardTitle>
                 <CardDescription className="text-xs">Latest student registrations</CardDescription>
               </div>
-              <Button variant="outline" size="sm" onClick={() => router.push("/admin/students")}>
+              <Button variant="outline" size="sm" onClick={() => router.push("/admin/student")}>
                 View All
               </Button>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b text-left text-sm font-medium text-muted-foreground">
-                    <th className="pb-3 pr-4">Name</th>
-                    <th className="pb-3 pr-4">Course</th>
-                    <th className="hidden pb-3 pr-4 md:table-cell">Branch</th>
-                    <th className="hidden pb-3 pr-4 sm:table-cell">Date</th>
-                    <th className="pb-3 text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentEnrollments.map((enrollment) => (
-                    <tr
-                      key={enrollment.name}
-                      className="border-b last:border-0"
-                    >
-                      <td className="py-3 pr-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-sm font-medium">
-                            {enrollment.name
-                              .split(" ")
-                              .map((n) => n[0])
-                              .join("")}
-                          </div>
-                          <span className="font-medium">{enrollment.name}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 pr-4 text-muted-foreground">
-                        {enrollment.course}
-                      </td>
-                      <td className="hidden py-3 pr-4 text-muted-foreground md:table-cell">
-                        {enrollment.branch}
-                      </td>
-                      <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
-                        {enrollment.date}
-                      </td>
-                      <td className="py-3 text-right">
-                        <Badge variant={statusVariant[enrollment.status]}>
-                          {enrollment.status}
-                        </Badge>
-                      </td>
+            {recentEnrollments.length === 0 ? (
+              <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
+                No recent enrollments yet
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b text-left text-sm font-medium text-muted-foreground">
+                      <th className="pb-3 pr-4">Name</th>
+                      <th className="pb-3 pr-4">Course</th>
+                      <th className="hidden pb-3 pr-4 md:table-cell">Branch</th>
+                      <th className="hidden pb-3 pr-4 sm:table-cell">Date</th>
+                      <th className="pb-3 text-right">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {recentEnrollments.map((enrollment) => (
+                      <tr
+                        key={`${enrollment.name}-${enrollment.date}`}
+                        className="border-b last:border-0"
+                      >
+                        <td className="py-3 pr-4">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-sm font-medium">
+                              {enrollment.name
+                                .split(" ")
+                                .map((n) => n[0])
+                                .join("")}
+                            </div>
+                            <span className="font-medium">{enrollment.name}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 pr-4 text-muted-foreground">
+                          {enrollment.course}
+                        </td>
+                        <td className="hidden py-3 pr-4 text-muted-foreground md:table-cell">
+                          {enrollment.branch}
+                        </td>
+                        <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
+                          {enrollment.date}
+                        </td>
+                        <td className="py-3 text-right">
+                          <Badge variant={statusVariant[enrollment.status]}>
+                            {enrollment.status}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -520,19 +553,25 @@ export default function AdminDashboardPage() {
             <CardDescription className="text-xs">Items requiring attention</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {pendingTasks.map((task) => (
-                <div key={task.task} className="flex items-start gap-3">
-                  <CheckCircle2 className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm">{task.task}</p>
-                    <Badge variant={priorityBadge[task.priority]} className="mt-1 text-xs">
-                      {task.priority}
-                    </Badge>
+            {pendingTasks.length === 0 ? (
+              <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
+                No pending tasks
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {pendingTasks.map((task) => (
+                  <div key={task.task} className="flex items-start gap-3">
+                    <CheckCircle2 className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm">{task.task}</p>
+                      <Badge variant={priorityBadge[task.priority]} className="mt-1 text-xs">
+                        {task.priority}
+                      </Badge>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

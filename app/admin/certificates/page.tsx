@@ -23,6 +23,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from "@/components/ui/sheet"
+import {
   Select,
   SelectTrigger,
   SelectValue,
@@ -66,8 +74,10 @@ export default function AdminCertificatesPage() {
   const [loading, setLoading] = useState(true)
   const [certificates, setCertificates] = useState<Certificate[]>([])
   const [issueOpen, setIssueOpen] = useState(false)
+  const [studentPickerOpen, setStudentPickerOpen] = useState(false)
   const [students, setStudents] = useState<StudentOption[]>([])
   const [selectedStudent, setSelectedStudent] = useState("")
+  const [studentSearch, setStudentSearch] = useState("")
   const [certType, setCertType] = useState("Completion")
   const [issuing, setIssuing] = useState(false)
 
@@ -84,11 +94,17 @@ export default function AdminCertificatesPage() {
       return
     }
 
+    const courseSlugs = [...new Set((data || []).map((row) => row.course_slug).filter(Boolean))] as string[]
+    const { data: courseRows } = courseSlugs.length
+      ? await supabase.from("courses").select("slug, name").in("slug", courseSlugs)
+      : { data: [] }
+    const courseMap = new Map((courseRows ?? []).map((course) => [course.slug, course.name]))
+
     const mapped: Certificate[] = (data || []).map((row) => ({
       id: row.id,
       studentName: row.student_name,
       studentId: row.student_id,
-      course: row.course_slug || "—",
+      course: row.course_slug ? (courseMap.get(row.course_slug) ?? row.course_slug) : "—",
       type: row.type,
       issuedDate: row.issued_date || "—",
       credentialId: row.credential_id || "—",
@@ -100,9 +116,11 @@ export default function AdminCertificatesPage() {
   }
 
   async function fetchStudents() {
-    const [studentsRes, instRes] = await Promise.all([
-      supabase.from("students").select("id, full_name, course_slug").order("full_name"),
+    const [studentsRes, instRes, feesRes, certRes] = await Promise.all([
+      supabase.from("students").select("id, full_name").order("full_name"),
       supabase.from("fee_installments").select("fee_id, status"),
+      supabase.from("fees").select("id, student_id, course_slug"),
+      supabase.from("certificates").select("student_id, course_slug, status"),
     ])
 
     const installmentRows = instRes.data || []
@@ -113,23 +131,26 @@ export default function AdminCertificatesPage() {
       byFee.set(row.fee_id, arr)
     })
 
-    const { data: feesData } = await supabase.from("fees").select("id, student_id")
-    const eligibleStudents = new Set(
-      (feesData || [])
-        .filter((f) => {
-          const statuses = byFee.get(f.id)
-          return !!statuses && statuses.length > 0 && statuses.every((s) => s === "Paid")
-        })
-        .map((f) => f.student_id)
+    const issuedKeys = new Set(
+      (certRes.data || [])
+        .filter((row) => row.student_id && row.course_slug && row.status === "Issued")
+        .map((row) => `${row.student_id}:${row.course_slug}`)
     )
 
-    const studentsData = (studentsRes.data || []).filter((s) => eligibleStudents.has(s.id))
-    if (studentsData.length === 0) {
+    const feeRows = feesRes.data || []
+    const eligibleFeeRows = feeRows.filter((fee) => {
+      const statuses = byFee.get(fee.id)
+      const key = fee.student_id && fee.course_slug ? `${fee.student_id}:${fee.course_slug}` : null
+      return !!fee.course_slug && !!statuses && statuses.length > 0 && statuses.every((status) => status === "Paid") && (!key || !issuedKeys.has(key))
+    })
+
+    const studentsData = studentsRes.data || []
+    if (studentsData.length === 0 || eligibleFeeRows.length === 0) {
       setStudents([])
       return
     }
 
-    const courseSlugs = [...new Set(studentsData.map((s) => s.course_slug).filter(Boolean))] as string[]
+    const courseSlugs = [...new Set(eligibleFeeRows.map((fee) => fee.course_slug).filter(Boolean))] as string[]
     let coursesMap: Record<string, string> = {}
 
     if (courseSlugs.length > 0) {
@@ -142,12 +163,28 @@ export default function AdminCertificatesPage() {
       }
     }
 
-    const options: StudentOption[] = studentsData.map((s) => ({
-      id: s.id,
-      full_name: s.full_name,
-      course_slug: s.course_slug,
-      courseName: s.course_slug ? coursesMap[s.course_slug] ?? s.course_slug : "—",
-    }))
+    const options: StudentOption[] = []
+    const byStudent = new Map<string, StudentOption[]>()
+
+    eligibleFeeRows.forEach((fee) => {
+      const student = studentsData.find((item) => item.id === fee.student_id)
+      if (!student || !fee.course_slug) return
+
+      const option: StudentOption = {
+        id: `${student.id}:${fee.course_slug}`,
+        full_name: student.full_name,
+        course_slug: fee.course_slug,
+        courseName: coursesMap[fee.course_slug] ?? fee.course_slug,
+      }
+
+      const existing = byStudent.get(student.id) || []
+      existing.push(option)
+      byStudent.set(student.id, existing)
+    })
+
+    byStudent.forEach((items) => {
+      items.forEach((option) => options.push(option))
+    })
 
     setStudents(options)
   }
@@ -181,18 +218,52 @@ export default function AdminCertificatesPage() {
 
     const certId = `CERT-${Date.now()}`
     const credentialId = `TNGC-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9999)).padStart(4, "0")}`
+    const issuedDate = new Date().toISOString().split("T")[0]
 
-    const { error } = await supabase.from("certificates").insert({
-      id: certId,
-      student_id: student.id,
-      student_name: student.full_name,
-      course_slug: student.course_slug,
-      name: `${student.courseName} ${certType} Certificate`,
-      type: certType as "Completion" | "Proficiency" | "Module",
-      credential_id: credentialId,
-      issued_date: new Date().toISOString().split("T")[0],
-      status: "Issued",
-    })
+    const { data: existingCert, error: existingError } = await supabase
+      .from("certificates")
+      .select("id, status")
+      .eq("student_id", student.id.split(":")[0])
+      .eq("course_slug", student.course_slug)
+      .limit(1)
+      .maybeSingle()
+
+    if (existingError && existingError.code !== "PGRST116") {
+      setIssuing(false)
+      toast("Failed to verify certificate status: " + existingError.message, { variant: "destructive" })
+      return
+    }
+
+    let error
+
+    if (existingCert) {
+      ;({ error } = await supabase
+        .from("certificates")
+        .update({
+          student_name: student.full_name,
+          name: `${student.courseName} ${certType} Certificate`,
+          type: certType as "Completion" | "Proficiency" | "Module",
+          credential_id: credentialId,
+          issued_date: issuedDate,
+          issued_by: "admin",
+          status: "Issued",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingCert.id))
+    } else {
+      ;({ error } = await supabase.from("certificates").insert({
+        id: certId,
+        student_id: student.id.split(":")[0],
+        student_name: student.full_name,
+        course_slug: student.course_slug,
+        name: `${student.courseName} ${certType} Certificate`,
+        type: certType as "Completion" | "Proficiency" | "Module",
+        credential_id: credentialId,
+        issued_date: issuedDate,
+        issued_by: "admin",
+        status: "Issued",
+      }))
+    }
 
     setIssuing(false)
 
@@ -343,19 +414,20 @@ export default function AdminCertificatesPage() {
 
           <div className="flex flex-col gap-4">
             <div className="space-y-1.5">
-              <Label>Select Student *</Label>
-              <Select value={selectedStudent} onValueChange={(v) => setSelectedStudent(v ?? "")}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a student" />
-                </SelectTrigger>
-                <SelectContent>
-                  {students.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.full_name} — {s.courseName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Student *</Label>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-between"
+                onClick={() => setStudentPickerOpen(true)}
+              >
+                <span className="truncate">
+                  {selectedStudent
+                    ? students.find((s) => s.id === selectedStudent)?.full_name + " — " + (students.find((s) => s.id === selectedStudent)?.courseName ?? "")
+                    : "Choose a student"}
+                </span>
+                <span className="text-xs text-muted-foreground">Select</span>
+              </Button>
               {students.length === 0 && (
                 <p className="text-xs text-muted-foreground">
                   No students have completed all their installments yet.
@@ -398,6 +470,77 @@ export default function AdminCertificatesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Sheet open={studentPickerOpen} onOpenChange={setStudentPickerOpen}>
+        <SheetContent side="left" className="w-full max-w-md border-r bg-background px-0 pb-0 pt-0 text-foreground sm:max-w-md">
+          <SheetHeader className="border-b bg-background px-4 pb-3 pt-4">
+            <SheetTitle>Select Student & Course</SheetTitle>
+            <SheetDescription>Search and choose a completed course certificate to issue.</SheetDescription>
+          </SheetHeader>
+
+          <div className="flex h-full flex-col px-4 pb-4 pt-3">
+            <div className="sticky top-0 z-10 bg-background pb-3">
+              <Input
+                placeholder="Search students or courses..."
+                value={studentSearch}
+                onChange={(event) => setStudentSearch(event.target.value)}
+              />
+            </div>
+
+            <div className="flex-1 space-y-2 overflow-y-auto pr-1 [scrollbar-color:rgba(148,163,184,0.65)_transparent] [-ms-overflow-style:none] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-transparent dark:[&::-webkit-scrollbar-thumb]:bg-slate-700">
+              {students
+                .filter((student) => {
+                  const query = studentSearch.trim().toLowerCase()
+                  if (!query) return true
+                  return (
+                    student.full_name.toLowerCase().includes(query) ||
+                    student.courseName.toLowerCase().includes(query)
+                  )
+                })
+                .map((student) => (
+                  <button
+                    key={student.id}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-xl border p-3 text-left transition-colors hover:bg-accent/60",
+                      selectedStudent === student.id && "border-primary bg-primary/5"
+                    )}
+                    onClick={() => {
+                      setSelectedStudent(student.id)
+                      setStudentPickerOpen(false)
+                      setStudentSearch("")
+                    }}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{student.full_name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{student.courseName}</p>
+                    </div>
+                    <span className="shrink-0 text-xs text-muted-foreground">Select</span>
+                  </button>
+                ))}
+
+              {students.filter((student) => {
+                const query = studentSearch.trim().toLowerCase()
+                if (!query) return true
+                return (
+                  student.full_name.toLowerCase().includes(query) ||
+                  student.courseName.toLowerCase().includes(query)
+                )
+              }).length === 0 && (
+                <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+                  No matching student or course found.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <SheetFooter className="border-t px-4 py-3">
+            <Button variant="outline" className="w-full" onClick={() => setStudentPickerOpen(false)}>
+              Close
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

@@ -27,13 +27,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select"
-import {
   Tabs,
   TabsList,
   TabsTrigger,
@@ -46,7 +39,6 @@ import {
   CheckCircle2,
   Clock,
   AlertTriangle,
-  Plus,
   Loader2,
   RotateCcw,
 } from "lucide-react"
@@ -63,22 +55,16 @@ interface Installment {
   label: string
   installmentNo: number
   amount: number
+  paidAmount: number
+  balance: number
+  pendingClaimAmount: number
+  pendingPaymentIds: string[]
+  pendingReference: string
   dueDate: string
   paidDate: string | null
-  status: "Paid" | "Pending"
+  status: "Paid" | "Pending" | "Partial"
   branch: string
   branchId: string | null
-}
-
-interface StudentOption {
-  id: string
-  full_name: string
-  course_slug: string | null
-  courseName: string
-  feeId: string
-  total_fee: number
-  paid_amount: number
-  branch_name: string
 }
 
 interface StudentMapEntry {
@@ -89,6 +75,7 @@ interface StudentMapEntry {
 const statusConfig: Record<string, { className: string; icon: React.ElementType }> = {
   Paid: { className: "bg-emerald-500/15 text-emerald-600", icon: CheckCircle2 },
   Pending: { className: "bg-amber-500/15 text-amber-600", icon: Clock },
+  Partial: { className: "bg-sky-500/15 text-sky-600", icon: CheckCircle2 },
   Overdue: { className: "bg-red-500/15 text-red-600", icon: AlertTriangle },
 }
 
@@ -107,15 +94,10 @@ export default function InstallmentsPage() {
   ])
   const perPage = 10
 
-  const [addOpen, setAddOpen] = useState(false)
-  const [students, setStudents] = useState<StudentOption[]>([])
-  const [selectedStudent, setSelectedStudent] = useState("")
-  const [installmentCount, setInstallmentCount] = useState("3")
-  const [creating, setCreating] = useState(false)
-
   const [payOpen, setPayOpen] = useState(false)
   const [payingId, setPayingId] = useState<string | null>(null)
   const [paying, setPaying] = useState(false)
+  const [verifyingId, setVerifyingId] = useState<string | null>(null)
   const [unmarkingId, setUnmarkingId] = useState<string | null>(null)
   const [confirmUnmark, setConfirmUnmark] = useState<Installment | null>(null)
   const [unmarkReason, setUnmarkReason] = useState("")
@@ -138,6 +120,35 @@ export default function InstallmentsPage() {
       setInstallments([])
       setLoading(false)
       return
+    }
+
+    const { data: payments, error: paymentsError } = await supabase
+      .from("payments")
+      .select("id, installment_id, amount, payment_date, status, description")
+      .in("status", ["Paid", "Pending"])
+      .in("installment_id", rows.map((row) => row.id))
+
+    if (paymentsError) {
+      console.error("Error fetching installment payments:", paymentsError)
+      setLoading(false)
+      return
+    }
+
+    const paidByInstallment: Record<string, number> = {}
+    const pendingByInstallment: Record<string, { amount: number; ids: string[]; reference: string }> = {}
+    for (const payment of payments ?? []) {
+      if (!payment.installment_id) continue
+
+      if (payment.status === "Paid") {
+        paidByInstallment[payment.installment_id] =
+          (paidByInstallment[payment.installment_id] ?? 0) + payment.amount
+      } else if (payment.status === "Pending") {
+        const claim = pendingByInstallment[payment.installment_id] ?? { amount: 0, ids: [], reference: "" }
+        claim.amount += payment.amount
+        claim.ids.push(payment.id)
+        claim.reference = claim.reference || payment.description || ""
+        pendingByInstallment[payment.installment_id] = claim
+      }
     }
 
     const studentIds = [...new Set(rows.map((r) => r?.fees?.student_id).filter(Boolean))] as string[]
@@ -168,6 +179,10 @@ export default function InstallmentsPage() {
       const student = studentsMap[row.fees?.student_id ?? ""]
       const branchName = student ? (branchesMap[student.branch_id ?? ""] || "N/A") : "N/A"
       const courseName = coursesMap[row.fees?.course_slug] || row.fees?.course_slug || "N/A"
+      const ledgerPaid = paidByInstallment[row.id] ?? 0
+      const pendingClaim = pendingByInstallment[row.id]
+      const paidAmount = Math.min(row.amount, row.status === "Paid" ? Math.max(ledgerPaid, row.amount) : ledgerPaid)
+      const balance = Math.max(0, Number((row.amount - paidAmount).toFixed(2)))
 
       return {
         id: row.id,
@@ -178,9 +193,14 @@ export default function InstallmentsPage() {
         label: row.label,
         installmentNo: row.installment_no ?? 0,
         amount: row.amount,
+        paidAmount,
+        balance,
+        pendingClaimAmount: pendingClaim?.amount ?? 0,
+        pendingPaymentIds: pendingClaim?.ids ?? [],
+        pendingReference: pendingClaim?.reference ?? "",
         dueDate: row.due_date,
         paidDate: row.paid_date,
-        status: row.status as "Paid" | "Pending",
+        status: balance === 0 ? "Paid" : paidAmount > 0 ? "Partial" : "Pending",
         branch: branchName,
         branchId: student?.branch_id ?? null,
       }
@@ -188,25 +208,19 @@ export default function InstallmentsPage() {
 
     setInstallments(parsed)
 
-    const totalCollected = parsed
-      .filter((i) => i.status === "Paid")
-      .reduce((sum, i) => sum + i.amount, 0)
-    const pendingAmount = parsed
-      .filter((i) => i.status === "Pending")
-      .reduce((sum, i) => sum + i.amount, 0)
+    const totalCollected = parsed.reduce((sum, i) => sum + i.paidAmount, 0)
+    const pendingAmount = parsed.reduce((sum, i) => sum + i.balance, 0)
     const now = new Date()
     const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
-    const thisMonthAmount = parsed
-      .filter((i) => i.status === "Paid" && i.paidDate?.startsWith(thisMonth))
-      .reduce((sum, i) => sum + i.amount, 0)
+    const thisMonthAmount = (payments ?? [])
+      .filter((payment) => payment.status === "Paid" && payment.payment_date.startsWith(thisMonth))
+      .reduce((sum, payment) => sum + payment.amount, 0)
 
-    // Overdue is Pending installments whose due date has passed. It used to be a
-    // copy of the Pending figure, so the two cards always agreed and neither ever
-    // told an admin which installments were actually late.
+    // Overdue counts only the outstanding balance on installments past due.
     const today = now.toISOString().split("T")[0]
     const overdueAmount = parsed
-      .filter((i) => i.status === "Pending" && i.dueDate < today)
-      .reduce((sum, i) => sum + i.amount, 0)
+      .filter((i) => i.balance > 0 && i.dueDate < today)
+      .reduce((sum, i) => sum + i.balance, 0)
 
     setStats([
       { label: "Total Collected", value: `₹${totalCollected.toLocaleString("en-IN")}`, color: "text-emerald-600 dark:text-emerald-400" },
@@ -223,113 +237,47 @@ export default function InstallmentsPage() {
     fetchInstallments()
   }, [fetchInstallments])
 
-  async function fetchStudents() {
-    const { data: feesData } = await supabase
-      .from("fees")
-      .select("id, student_id, course_slug, total_fee, paid_amount")
-
-    if (!feesData || feesData.length === 0) {
-      setStudents([])
-      return
-    }
-
-    const studentIds = feesData.map((f) => f.student_id).filter(Boolean) as string[]
-    const courseSlugs = feesData.map((f) => f.course_slug).filter(Boolean) as string[]
-
-    const [studentsRes, coursesRes] = await Promise.all([
-      supabase.from("students").select("id, full_name, branch_id").in("id", studentIds),
-      supabase.from("courses").select("slug, name").in("slug", courseSlugs),
-    ])
-
-    const coursesMap: Record<string, string> = Object.fromEntries((coursesRes.data || []).map((c) => [c.slug, c.name]))
-
-    const branchIds = [...new Set((studentsRes.data || []).map((s) => s.branch_id).filter(Boolean))] as string[]
-    let branchesMap: Record<string, string> = {}
-    if (branchIds.length > 0) {
-      const { data: branchRows } = await supabase.from("branches").select("id, name").in("id", branchIds)
-      if (branchRows) {
-        branchesMap = Object.fromEntries(branchRows.map((b) => [b.id, b.name]))
-      }
-    }
-
-    const studentsMap: Record<string, StudentMapEntry> = Object.fromEntries((studentsRes.data || []).map((s) => [s.id, s]))
-
-    const options: StudentOption[] = feesData.map((f) => {
-      const s = studentsMap[f.student_id]
-      return {
-        id: f.student_id,
-        full_name: s?.full_name ?? "Unknown",
-        course_slug: f.course_slug,
-        courseName: coursesMap[f.course_slug] ?? f.course_slug ?? "N/A",
-        feeId: f.id,
-        total_fee: f.total_fee,
-        paid_amount: f.paid_amount,
-        branch_name: branchesMap[s?.branch_id ?? ""] ?? "N/A",
-      }
-    })
-
-    setStudents(options)
-  }
-
-  async function handleCreateInstallments() {
-    if (!selectedStudent) {
-      toast("Please select a student", { variant: "destructive" })
-      return
-    }
-
-    setCreating(true)
-    const student = students.find((s) => s.feeId === selectedStudent)
-    if (!student) {
-      toast("Student not found", { variant: "destructive" })
-      setCreating(false)
-      return
-    }
-
-    const count = parseInt(installmentCount)
+  async function handleConfirmClaim(inst: Installment) {
+    if (inst.pendingPaymentIds.length === 0 || verifyingId) return
+    setVerifyingId(inst.id)
 
     try {
-      // The endpoint verifies the admin session server-side; without the token it
-      // cannot tell an administrator from an anonymous visitor.
       const { data: sessionData } = await supabase.auth.getSession()
       const token = sessionData.session?.access_token
 
       if (!token) {
         toast("Your session has expired. Please sign in again.", { variant: "destructive" })
-        setCreating(false)
         return
       }
 
-      const res = await fetch("/api/installments/plan", {
+      const response = await fetch("/api/installments/verify", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ feeId: selectedStudent, count }),
+        body: JSON.stringify({ paymentIds: inst.pendingPaymentIds, approve: true }),
       })
+      const result = (await response.json()) as { error?: string; amount?: number; settled?: number }
 
-      const json = (await res.json()) as { error?: string }
-
-      if (!res.ok) {
-        toast(json.error ?? "We couldn't build that schedule. Nothing was changed.", {
+      if (!response.ok) {
+        toast(result.error ?? "We couldn't confirm this payment. Nothing was changed.", {
           variant: "destructive",
-          duration: 10000,
         })
-        setCreating(false)
         return
       }
 
-      toast(`${count}-installment plan created`, { variant: "success" })
-      setSelectedStudent("")
-      setInstallmentCount("3")
-      setAddOpen(false)
+      toast(
+        `Confirmed ${inst.label} for ${inst.studentName}: ₹${Number(result.amount ?? inst.pendingClaimAmount).toLocaleString("en-IN")}.`,
+        { variant: "success" }
+      )
       fetchInstallments()
     } catch {
-      toast("We couldn't build that schedule. Nothing was changed — please try again.", {
+      toast("We couldn't confirm this payment. Nothing was changed — please try again.", {
         variant: "destructive",
       })
     } finally {
-      setCreating(false)
+      setVerifyingId(null)
     }
   }
 
@@ -380,7 +328,9 @@ export default function InstallmentsPage() {
       }
 
       setPaying(false)
-      toast(`${inst.label} marked as paid`, { variant: "success" })
+      toast(`${inst.label} fully paid with ₹${Number(json.amount ?? inst.balance).toLocaleString("en-IN")}`, {
+        variant: "success",
+      })
       setPayOpen(false)
       setPayingId(null)
       fetchInstallments()
@@ -426,7 +376,7 @@ export default function InstallmentsPage() {
         return
       }
 
-      toast(`${inst.label} is back to unpaid, and ₹${inst.amount.toLocaleString("en-IN")} was credited back.`, {
+      toast(`₹${inst.paidAmount.toLocaleString("en-IN")} was reversed and added back to ${inst.studentName}'s balance.`, {
         variant: "success",
       })
       setUnmarkingId(null)
@@ -444,13 +394,15 @@ export default function InstallmentsPage() {
       toast("Nothing to export", { variant: "destructive" })
       return
     }
-    const header = ["Student", "Student ID", "Course", "Installment", "Amount", "Due Date", "Paid Date", "Status", "Branch"]
+    const header = ["Student", "Student ID", "Course", "Installment", "Amount", "Paid", "Balance", "Due Date", "Paid Date", "Status", "Branch"]
     const rows = [header, ...filtered.map((i) => [
       i.studentName,
       i.studentId,
       i.course,
       i.label,
       String(i.amount),
+      String(i.paidAmount),
+      String(i.balance),
       i.dueDate,
       i.paidDate ?? "",
       i.status,
@@ -493,10 +445,6 @@ export default function InstallmentsPage() {
           <h1 className="text-2xl font-bold tracking-tight">Installments</h1>
           <p className="text-xs text-muted-foreground">Track and manage student installment payments</p>
         </div>
-        <Button size="sm" className="gap-2" onClick={() => { setAddOpen(true); fetchStudents() }}>
-          <Plus className="h-4 w-4" />
-          Create Plan
-        </Button>
       </div>
 
       <div className="grid gap-2 grid-cols-2 lg:grid-cols-4">
@@ -543,6 +491,7 @@ export default function InstallmentsPage() {
               <TabsTrigger value="all">All</TabsTrigger>
               <TabsTrigger value="paid">Paid</TabsTrigger>
               <TabsTrigger value="pending">Pending</TabsTrigger>
+              <TabsTrigger value="partial">Partial</TabsTrigger>
             </TabsList>
           </Tabs>
 
@@ -553,6 +502,8 @@ export default function InstallmentsPage() {
                 <TableHead className="hidden md:table-cell">Course</TableHead>
                 <TableHead>Installment</TableHead>
                 <TableHead className="hidden sm:table-cell">Amount</TableHead>
+                <TableHead className="hidden md:table-cell">Paid</TableHead>
+                <TableHead>Balance</TableHead>
                 <TableHead className="hidden lg:table-cell">Due Date</TableHead>
                 <TableHead className="hidden lg:table-cell">Paid Date</TableHead>
                 <TableHead>Status</TableHead>
@@ -573,25 +524,62 @@ export default function InstallmentsPage() {
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-muted-foreground">{inst.course}</TableCell>
                     <TableCell>
-                      <span className="font-medium">{inst.label}</span>
+                      <div>
+                        <span className="font-medium">{inst.label}</span>
+                        {inst.pendingPaymentIds.length > 0 && (
+                          <p className="text-xs text-amber-700 dark:text-amber-400">
+                            ₹{inst.pendingClaimAmount.toLocaleString("en-IN")} claimed · awaiting review
+                          </p>
+                        )}
+                        {inst.pendingReference && (
+                          <p className="max-w-48 truncate text-xs text-muted-foreground" title={inst.pendingReference}>
+                            {inst.pendingReference}
+                          </p>
+                        )}
+                      </div>
                     </TableCell>
-                    <TableCell className="hidden sm:table-cell font-medium">₹{inst.amount.toLocaleString()}</TableCell>
+                    <TableCell className="hidden sm:table-cell font-medium">₹{inst.amount.toLocaleString("en-IN")}</TableCell>
+                    <TableCell className="hidden md:table-cell text-emerald-700 dark:text-emerald-400">₹{inst.paidAmount.toLocaleString("en-IN")}</TableCell>
+                    <TableCell className="font-semibold">₹{inst.balance.toLocaleString("en-IN")}</TableCell>
                     <TableCell className="hidden lg:table-cell text-muted-foreground">{inst.dueDate}</TableCell>
                     <TableCell className="hidden lg:table-cell text-muted-foreground">{inst.paidDate ?? "—"}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={cn("gap-1", cfg.className)}>
-                        <Icon className="size-3" />
-                        {inst.status}
-                      </Badge>
+                      {inst.pendingPaymentIds.length > 0 ? (
+                        <Badge variant="secondary" className="gap-1 bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                          <Clock className="size-3" />
+                          Awaiting review
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className={cn("gap-1", cfg.className)}>
+                          <Icon className="size-3" />
+                          {inst.status}
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
-                        {inst.status === "Pending" && (
+                        {inst.pendingPaymentIds.length > 0 ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 gap-1.5 border-emerald-600/30 px-2 text-emerald-700 hover:bg-emerald-600/10 dark:text-emerald-400"
+                            onClick={() => handleConfirmClaim(inst)}
+                            disabled={verifyingId !== null}
+                            title="Confirm this student payment"
+                          >
+                            {verifyingId === inst.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="size-4" />
+                            )}
+                            Confirm
+                          </Button>
+                        ) : inst.status !== "Paid" && (
                           <Button
                             variant="ghost"
                             size="icon-sm"
                             onClick={() => { setPayingId(inst.id); setPayOpen(true) }}
-                            title="Mark as paid"
+                            title="Collect remaining balance"
                           >
                             <CheckCircle2 className="size-4 text-emerald-600" />
                           </Button>
@@ -600,12 +588,12 @@ export default function InstallmentsPage() {
                             the only direction available, so a payment that never
                             arrived could only be corrected by hand — and the
                             ledger row stayed counted as revenue. */}
-                        {inst.status === "Paid" && (
+                        {(inst.status === "Paid" || inst.status === "Partial") && (
                           <Button
                             variant="ghost"
                             size="icon-sm"
                             onClick={() => setConfirmUnmark(inst)}
-                            title="Mark as unpaid — payment not received"
+                            title="Reverse verified payments"
                             disabled={unmarkingId === inst.id}
                           >
                             {unmarkingId === inst.id ? (
@@ -622,7 +610,7 @@ export default function InstallmentsPage() {
               })}
               {paginated.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center">
+                  <TableCell colSpan={10} className="h-24 text-center">
                     <div className="flex flex-col items-center gap-2">
                       <Clock className="h-8 w-8 text-muted-foreground/50" />
                       <p className="text-sm text-muted-foreground">No installments found</p>
@@ -661,111 +649,37 @@ export default function InstallmentsPage() {
         </CardFooter>
       </Card>
 
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Plus className="size-5" />
-              Create Installment Plan
-            </DialogTitle>
-            <DialogDescription>
-              Set up a monthly installment plan for a student
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex flex-col gap-4">
-            <div className="space-y-1.5">
-              <Label>Select Student *</Label>
-              <Select value={selectedStudent} onValueChange={(v) => setSelectedStudent(v ?? "")}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a student" />
-                </SelectTrigger>
-                <SelectContent>
-                  {students.map((s) => (
-                    <SelectItem key={s.feeId} value={s.feeId}>
-                      {s.full_name} — {s.courseName} (Fee: ₹{s.total_fee.toLocaleString()})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Number of Months *</Label>
-              <Select value={installmentCount} onValueChange={(v) => setInstallmentCount(v ?? "3")}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select months" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="2">2 Months</SelectItem>
-                  <SelectItem value="3">3 Months</SelectItem>
-                  <SelectItem value="4">4 Months</SelectItem>
-                  <SelectItem value="6">6 Months</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {selectedStudent && (() => {
-              const s = students.find((st) => st.feeId === selectedStudent)
-              if (!s) return null
-              const count = parseInt(installmentCount)
-              const remaining = s.total_fee - s.paid_amount
-              // Mirrors create_fee_schedule(): the last installment takes the
-              // remainder. The old preview used Math.ceil for every row, so it
-              // showed a per-month figure that added up to more than the fee.
-              const per = Math.floor(remaining / count)
-              const last = remaining - per * (count - 1)
-              return (
-                <div className="rounded-lg bg-muted/50 p-3 space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Total Fee</span>
-                    <span className="font-medium">₹{s.total_fee.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Already Paid</span>
-                    <span className="font-medium">₹{s.paid_amount.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between border-t pt-1">
-                    <span className="text-muted-foreground">To Schedule</span>
-                    <span className="font-medium">₹{remaining.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between border-t pt-1">
-                    <span className="font-semibold">Installments 1–{count - 1}</span>
-                    <span className="font-semibold text-primary">₹{per.toLocaleString()} each</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="font-semibold">Installment {count}</span>
-                    <span className="font-semibold text-primary">₹{last.toLocaleString()}</span>
-                  </div>
-                </div>
-              )
-            })()}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreateInstallments} disabled={creating || !selectedStudent}>
-              {creating ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                "Create Plan"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={payOpen} onOpenChange={(open) => { setPayOpen(open); if (!open) setPayingId(null) }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Mark as Paid</DialogTitle>
             <DialogDescription>
-              Confirm this installment has been paid?
+              Confirm the remaining balance was received from the student?
             </DialogDescription>
           </DialogHeader>
+          {(() => {
+            const installment = installments.find((item) => item.id === payingId)
+            if (!installment) return null
+            return (
+              <div className="rounded-lg bg-muted/50 p-3 text-sm">
+                <p className="font-medium">{installment.studentName} — {installment.label}</p>
+                <div className="mt-2 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Installment amount</span>
+                    <span>₹{installment.amount.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Already paid</span>
+                    <span>₹{installment.paidAmount.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between border-t pt-1 font-semibold">
+                    <span>Collect now</span>
+                    <span>₹{installment.balance.toLocaleString("en-IN")}</span>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
           <DialogFooter>
             <Button variant="outline" onClick={() => { setPayOpen(false); setPayingId(null) }}>Cancel</Button>
             <Button onClick={handleMarkPaid} disabled={paying} className="bg-emerald-600 hover:bg-emerald-700">
@@ -810,8 +724,8 @@ export default function InstallmentsPage() {
                 {confirmUnmark.studentName} — {confirmUnmark.label}
               </p>
               <p className="mt-1 text-muted-foreground">
-                ₹{confirmUnmark.amount.toLocaleString("en-IN")} will be credited back to this
-                student&rsquo;s outstanding balance.
+                ₹{confirmUnmark.paidAmount.toLocaleString("en-IN")} in verified payments will be
+                reversed and credited back to this student&rsquo;s outstanding balance.
               </p>
             </div>
           )}

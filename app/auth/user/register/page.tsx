@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { startTransition, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
@@ -9,6 +9,7 @@ import { buildUpiUri, UPI_CONTACT_NUMBER } from "@/lib/upi"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { PasswordVisibilityToggle } from "@/components/auth/password-visibility-toggle"
 import {
   Select,
   SelectContent,
@@ -51,6 +52,14 @@ import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/components/ui/sonner"
 import { describeAuthError } from "@/lib/errors"
+import {
+  clearStudentRegistrationStep,
+  clearStudentRegistrationDraft,
+  readStudentRegistrationDraft,
+  readStudentRegistrationStep,
+  saveStudentRegistrationStep,
+  saveStudentRegistrationDraft,
+} from "@/lib/auth/student-registration-draft"
 import type { Variants, Transition } from "framer-motion"
 
 type CourseCategory = "basic" | "programming" | "web" | "data" | "cloud" | "other"
@@ -159,6 +168,7 @@ function inr(amount: number): string {
 }
 
 const PASSWORD_MIN_LENGTH = 8
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 /**
  * Mirrors the rule in `/api/register` so the student is told what is wrong
@@ -188,7 +198,7 @@ export default function UserRegisterPage() {
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
   const [password, setPassword] = useState("")
-  const [confirmPassword, setConfirmPassword] = useState("")
+  const [passwordVisible, setPasswordVisible] = useState(false)
 
   const [fatherName, setFatherName] = useState("")
   const [branch, setBranch] = useState("")
@@ -201,6 +211,8 @@ export default function UserRegisterPage() {
   const [paymentDone, setPaymentDone] = useState(false)
   const [confirmingPayment, setConfirmingPayment] = useState(false)
   const [paymentReference, setPaymentReference] = useState("")
+  const [paymentMode, setPaymentMode] = useState<"installments" | "custom">("installments")
+  const [customPaymentAmount, setCustomPaymentAmount] = useState("")
   // Which of the three installments are being settled at registration. Defaults
   // to the first only, matching what the form did before the schedule existed:
   // it filed one payment for the whole course fee as though "Registration Fee"
@@ -211,6 +223,7 @@ export default function UserRegisterPage() {
   const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
   const [catalogueLoading, setCatalogueLoading] = useState(true)
   const [catalogueError, setCatalogueError] = useState<string | null>(null)
+  const [draftLoaded, setDraftLoaded] = useState(false)
 
   const steps = [
     { id: 1, title: "Personal Info",     icon: User,      description: "Tell us about yourself" },
@@ -234,9 +247,8 @@ export default function UserRegisterPage() {
    *
    * The first rows take the floor of the fee divided by three and the last one
    * absorbs the remainder, so the three always add back up to the course fee. The
-   * obvious alternative — Math.ceil for every row — makes the parts sum to more
-   * than the whole, which is the overshoot that used to be baked into the admin
-   * "Create Plan" dialog.
+  * obvious alternative — Math.ceil for every row — makes the parts sum to more
+  * than the whole and overstates the scheduled fee.
    */
   function installmentShare(n: number): number {
     if (totalFee <= 0) return 0
@@ -246,9 +258,98 @@ export default function UserRegisterPage() {
   }
 
   const payAllNow = paidInstallments.length === INSTALLMENT_COUNT
-  const amountToPay = paidInstallments.reduce((sum, n) => sum + installmentShare(n), 0)
+  const parsedCustomPaymentAmount = Number(customPaymentAmount)
+  const validCustomPaymentAmount =
+    customPaymentAmount.trim() !== "" &&
+    Number.isFinite(parsedCustomPaymentAmount) &&
+    parsedCustomPaymentAmount > 0 &&
+    parsedCustomPaymentAmount <= totalFee
+  const amountToPay = paymentMode === "custom"
+    ? validCustomPaymentAmount ? parsedCustomPaymentAmount : 0
+    : paidInstallments.reduce((sum, n) => sum + installmentShare(n), 0)
+
+  useEffect(() => {
+    const draft = readStudentRegistrationDraft()
+    const savedStep = readStudentRegistrationStep()
+    if (!draft) clearStudentRegistrationStep()
+
+    startTransition(() => {
+      if (draft) {
+        setFullName(draft.fullName)
+        setEmail(draft.email)
+        setPhone(draft.phone)
+        setFatherName(draft.fatherName)
+        setBranch(draft.branch)
+        setSelectedCourseSlugs(draft.selectedCourseSlugs)
+        setPresentStatus(draft.presentStatus)
+        setParentMobile(draft.parentMobile)
+        setAgreeTerms(draft.agreeTerms)
+        setSignature(draft.signature)
+        setPaymentReference(draft.paymentReference)
+        setPaymentMode(draft.paymentMode)
+        setCustomPaymentAmount(draft.customPaymentAmount)
+        setPaidInstallments(draft.paidInstallments)
+        setPaymentDone(draft.paymentDone)
+        setStep(savedStep ?? 1)
+      }
+      setDraftLoaded(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!draftLoaded || alreadyRegistered) return
+
+    const hasInputs = Boolean(
+      fullName || email || phone || fatherName || branch || selectedCourseSlugs.length ||
+      presentStatus || parentMobile || signature || paymentReference || customPaymentAmount
+    )
+
+    if (!hasInputs) {
+      clearStudentRegistrationDraft()
+      return
+    }
+
+    saveStudentRegistrationDraft({
+      fullName,
+      email,
+      phone,
+      fatherName,
+      branch,
+      selectedCourseSlugs,
+      presentStatus,
+      parentMobile,
+      agreeTerms,
+      signature,
+      paymentReference,
+      paymentMode,
+      customPaymentAmount,
+      paidInstallments,
+      paymentDone,
+    })
+    saveStudentRegistrationStep(step)
+  }, [
+    draftLoaded,
+    alreadyRegistered,
+    fullName,
+    email,
+    phone,
+    fatherName,
+    branch,
+    selectedCourseSlugs,
+    presentStatus,
+    parentMobile,
+    agreeTerms,
+    signature,
+    paymentReference,
+    paymentMode,
+    customPaymentAmount,
+    paidInstallments,
+    paymentDone,
+    step,
+  ])
 
   function togglePaidInstallment(n: number) {
+    setPaymentDone(false)
     setPaidInstallments((prev) =>
       prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n].sort((a, b) => a - b)
     )
@@ -334,9 +435,28 @@ export default function UserRegisterPage() {
 
   function goNext() {
     if (step >= totalSteps) return
-    if (step === 1 && (!fullName || !fatherName || !email || !phone)) return
-    if (step === 2 && (!branch || selectedCourseSlugs.length === 0)) return
-    if (step === 3 && !paymentDone) return
+
+    if (step === 1) {
+      if (!fullName.trim() || !fatherName.trim() || !email.trim() || phone.length !== 10) {
+        toast("Complete all required personal details before continuing.", { variant: "destructive" })
+        return
+      }
+      if (!EMAIL_PATTERN.test(email.trim())) {
+        toast("Enter a valid email address before continuing.", { variant: "destructive" })
+        return
+      }
+    }
+
+    if (step === 2 && (!branch || selectedCourseSlugs.length === 0)) {
+      toast("Select a branch and at least one course before continuing.", { variant: "destructive" })
+      return
+    }
+
+    if (step === 3 && !paymentDone) {
+      toast("Confirm your payment before continuing.", { variant: "destructive" })
+      return
+    }
+
     setDirection(1)
     setStep((s) => s + 1)
   }
@@ -349,12 +469,18 @@ export default function UserRegisterPage() {
   }
 
   function toggleCourse(slug: string) {
+    setPaymentDone(false)
     setSelectedCourseSlugs((prev) =>
       prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
     )
   }
 
   async function handlePaymentConfirm() {
+    if (totalFee > 0 && amountToPay <= 0) {
+      toast("Choose an installment or enter a valid custom amount.", { variant: "destructive" })
+      return
+    }
+
     setConfirmingPayment(true)
     setPaymentDone(true)
     setConfirmingPayment(false)
@@ -369,13 +495,28 @@ export default function UserRegisterPage() {
       return
     }
 
-    if (passwordIssue) {
-      toast(passwordIssue, { variant: "destructive" })
+    if (
+      !fullName.trim() ||
+      !fatherName.trim() ||
+      !EMAIL_PATTERN.test(email.trim()) ||
+      phone.length !== 10 ||
+      !branch ||
+      selectedCourseSlugs.length === 0 ||
+      parentMobile.length !== 10
+    ) {
+      toast("Complete all required personal, course, and contact fields before creating your account.", {
+        variant: "destructive",
+      })
       return
     }
 
-    if (password !== confirmPassword) {
-      toast("Passwords do not match", { variant: "destructive" })
+    if (!password) {
+      toast("Create a password before creating your account.", { variant: "destructive" })
+      return
+    }
+
+    if (passwordIssue) {
+      toast(passwordIssue, { variant: "destructive" })
       return
     }
 
@@ -394,22 +535,27 @@ export default function UserRegisterPage() {
       return
     }
 
-    if (!signature) {
-      toast("Please type your full name as signature", { variant: "destructive" })
+    if (signature.trim().toLowerCase() !== fullName.trim().toLowerCase()) {
+      toast("Type your full name exactly as your signature.", { variant: "destructive" })
       return
     }
 
-    // A course with no fee published yet cannot be paid at registration, and
-    // claiming a payment for it would file a claim against a zero-amount
-    // installment for an admin to reconcile.
-    if (totalFee <= 0 && paidInstallments.length > 0) {
-      setPaidInstallments([])
+    if (totalFee > 0 && paymentMode === "custom" && !validCustomPaymentAmount) {
+      toast(`Enter an amount greater than ₹0 and no more than ${inr(totalFee)}.`, {
+        variant: "destructive",
+      })
+      return
     }
 
-    if (totalFee > 0 && paidInstallments.length === 0) {
+    if (totalFee > 0 && paymentMode === "installments" && paidInstallments.length === 0) {
       toast("Choose which installment you are paying, or select all of them", {
         variant: "destructive",
       })
+      return
+    }
+
+    if (!registrationReady) {
+      toast("Complete all required fields before creating your account.", { variant: "destructive" })
       return
     }
 
@@ -431,7 +577,8 @@ export default function UserRegisterPage() {
           presentStatus,
           signature: signature.trim(),
           paymentReference: paymentReference.trim(),
-          paidInstallments,
+          paidInstallments: totalFee > 0 && paymentMode === "installments" ? paidInstallments : [],
+          customPaymentAmount: totalFee > 0 && paymentMode === "custom" ? amountToPay : null,
         }),
       })
 
@@ -439,6 +586,7 @@ export default function UserRegisterPage() {
 
       if (!res.ok) {
         if (res.status === 409) {
+          clearStudentRegistrationDraft()
           setAlreadyRegistered(true)
           toast(data.error || "An account with this email already exists.", {
             variant: "warning",
@@ -459,6 +607,8 @@ export default function UserRegisterPage() {
         })
         return
       }
+
+      clearStudentRegistrationDraft()
 
       // The account now exists and is confirmed, so this sign-in cannot fail on
       // a confirmation prompt. If it somehow does, the student record is already
@@ -494,10 +644,26 @@ export default function UserRegisterPage() {
   }
 
   const passwordIssue = password ? passwordProblem(password) : null
+  const registrationReady = Boolean(
+    fullName.trim() &&
+    fatherName.trim() &&
+    EMAIL_PATTERN.test(email.trim()) &&
+    phone.length === 10 &&
+    branch &&
+    selectedCourseSlugs.length > 0 &&
+    parentMobile.length === 10 &&
+    presentStatus &&
+    signature.trim().toLowerCase() === fullName.trim().toLowerCase() &&
+    password &&
+    !passwordIssue &&
+    agreeTerms &&
+    paymentDone &&
+    (totalFee <= 0 || (paymentMode === "custom" ? validCustomPaymentAmount : paidInstallments.length > 0))
+  )
 
   if (alreadyRegistered) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/30 px-4 py-8">
+      <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-background via-background to-muted/30 px-4 py-8">
         <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
           <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-amber-500/10">
             <AlertTriangle className="size-7 text-amber-600 dark:text-amber-400" />
@@ -542,7 +708,7 @@ export default function UserRegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/30 px-4 py-8">
+    <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-background via-background to-muted/30 px-4 py-8">
       <div className="w-full max-w-4xl">
         <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm ring-1 ring-foreground/5">
           <div className="flex items-center gap-3 border-b border-border bg-muted/20 px-4 py-3 lg:px-6">
@@ -833,7 +999,7 @@ export default function UserRegisterPage() {
                               <div className="rounded-xl border border-border p-4">
                                 <div className="flex items-center justify-between mb-3">
                                   <Label>What are you paying now?</Label>
-                                  {totalFee > 0 && (
+                                  {totalFee > 0 && paymentMode === "installments" && (
                                     <button
                                       type="button"
                                       onClick={() => setPaidInstallments(payAllNow ? [] : [1, 2, 3])}
@@ -843,6 +1009,39 @@ export default function UserRegisterPage() {
                                     </button>
                                   )}
                                 </div>
+
+                                {totalFee > 0 && (
+                                  <div className="mb-4 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1" role="radiogroup" aria-label="Payment amount mode">
+                                    <label className={cn(
+                                      "flex cursor-pointer items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                                      paymentMode === "installments" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                    )}>
+                                      <input
+                                        className="sr-only"
+                                        type="radio"
+                                        name="paymentMode"
+                                        value="installments"
+                                        checked={paymentMode === "installments"}
+                                        onChange={() => { setPaymentMode("installments"); setPaymentDone(false) }}
+                                      />
+                                      By installment
+                                    </label>
+                                    <label className={cn(
+                                      "flex cursor-pointer items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                                      paymentMode === "custom" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                    )}>
+                                      <input
+                                        className="sr-only"
+                                        type="radio"
+                                        name="paymentMode"
+                                        value="custom"
+                                        checked={paymentMode === "custom"}
+                                        onChange={() => { setPaymentMode("custom"); setPaymentDone(false) }}
+                                      />
+                                      Custom amount
+                                    </label>
+                                  </div>
+                                )}
 
                                 {totalFee <= 0 && (
                                   <p className="text-sm text-muted-foreground">
@@ -854,46 +1053,75 @@ export default function UserRegisterPage() {
 
                                 {totalFee > 0 && (
                                   <>
-                                    <div className="space-y-2">
-                                      {[1, 2, 3].map((n) => {
-                                        const share = installmentShare(n)
-                                        const checked = paidInstallments.includes(n)
-                                        return (
-                                          <label
-                                            key={n}
-                                            className={`flex items-center justify-between rounded-lg border p-3 transition-colors ${
-                                              checked
-                                                ? "border-primary bg-primary/5"
-                                                : "cursor-pointer border-border hover:bg-muted/50"
-                                            }`}
-                                          >
-                                            <div className="flex items-center gap-3">
-                                              <input
-                                                type="checkbox"
-                                                checked={checked}
-                                                onChange={() => togglePaidInstallment(n)}
-                                                className="size-4 accent-primary"
-                                              />
-                                              <span className="text-sm font-medium">
-                                                Installment {n}
-                                                {n === 3 && totalFee > 0 && (
-                                                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                                                    (final, adjusted)
-                                                  </span>
-                                                )}
-                                              </span>
-                                            </div>
-                                            <span className="text-sm font-semibold">
-                                              {inr(share)}
-                                            </span>
-                                          </label>
-                                        )
-                                      })}
-                                    </div>
+                                    {paymentMode === "installments" ? (
+                                      <div className="space-y-2">
+                                        {[1, 2, 3].map((n) => {
+                                          const share = installmentShare(n)
+                                          const checked = paidInstallments.includes(n)
+                                          return (
+                                            <label
+                                              key={n}
+                                              className={`flex items-center justify-between rounded-lg border p-3 transition-colors ${
+                                                checked
+                                                  ? "border-primary bg-primary/5"
+                                                  : "cursor-pointer border-border hover:bg-muted/50"
+                                              }`}
+                                            >
+                                              <div className="flex items-center gap-3">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={checked}
+                                                  onChange={() => togglePaidInstallment(n)}
+                                                  className="size-4 accent-primary"
+                                                />
+                                                <span className="text-sm font-medium">
+                                                  Installment {n}
+                                                  {n === 3 && totalFee > 0 && (
+                                                    <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                                                      (final, adjusted)
+                                                    </span>
+                                                  )}
+                                                </span>
+                                              </div>
+                                              <span className="text-sm font-semibold">{inr(share)}</span>
+                                            </label>
+                                          )
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        <Label htmlFor="customPaymentAmount">Amount to pay</Label>
+                                        <div className="relative">
+                                          <IndianRupee className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                                          <Input
+                                            id="customPaymentAmount"
+                                            type="number"
+                                            min="0.01"
+                                            max={totalFee}
+                                            step="0.01"
+                                            inputMode="decimal"
+                                            placeholder={`Up to ₹${totalFee.toLocaleString("en-IN")}`}
+                                            className="h-10 pl-10"
+                                            value={customPaymentAmount}
+                                            onChange={(event) => {
+                                              setCustomPaymentAmount(event.target.value)
+                                              setPaymentDone(false)
+                                            }}
+                                          />
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                          {validCustomPaymentAmount
+                                            ? `${inr(totalFee - amountToPay)} will remain on your fee balance.`
+                                            : `Enter an amount up to ${inr(totalFee)}.`}
+                                        </p>
+                                      </div>
+                                    )}
 
                                     <p className="mt-3 text-xs text-muted-foreground">
-                                      {paidInstallments.length === 0
-                                        ? "Select at least one installment, or pay the whole fee now."
+                                      {amountToPay <= 0
+                                        ? paymentMode === "custom"
+                                          ? "Enter the amount you are paying now."
+                                          : "Select at least one installment, or pay the whole fee now."
                                         : `Paying ${inr(amountToPay)} of ${inr(totalFee)} now. The rest stays on your schedule.`}
                                     </p>
                                   </>
@@ -955,7 +1183,7 @@ export default function UserRegisterPage() {
                                   <Button
                                     type="button"
                                     onClick={handlePaymentConfirm}
-                                    disabled={confirmingPayment}
+                                    disabled={confirmingPayment || (totalFee > 0 && amountToPay <= 0)}
                                     className="gap-2"
                                   >
                                     {confirmingPayment ? (
@@ -982,15 +1210,15 @@ export default function UserRegisterPage() {
                               <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                                 <div>
                                   <span className="text-muted-foreground">Name:</span>
-                                  <p className="font-semibold text-foreground break-words">{fullName}</p>
+                                  <p className="font-semibold text-foreground wrap-break-word">{fullName}</p>
                                 </div>
                                 <div>
                                   <span className="text-muted-foreground">Email:</span>
-                                  <p className="font-semibold text-foreground break-words">{email}</p>
+                                  <p className="font-semibold text-foreground wrap-break-word">{email}</p>
                                 </div>
                                 <div>
                                   <span className="text-muted-foreground">Course:</span>
-                                  <p className="font-semibold text-foreground break-words">{selectedCourseNames}</p>
+                                  <p className="font-semibold text-foreground wrap-break-word">{selectedCourseNames}</p>
                                 </div>
                                 <div>
                                   <span className="text-muted-foreground">Fee to Pay:</span>
@@ -1034,67 +1262,41 @@ export default function UserRegisterPage() {
                               </div>
                             </div>
 
-                            <div className="grid gap-4 sm:grid-cols-2">
-                              <div className="space-y-2">
-                                <Label htmlFor="password">Password *</Label>
-                                <div className="relative">
-                                  <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                                  <Input
-                                    id="password"
-                                    type="password"
-                                    autoComplete="new-password"
-                                    placeholder="Create a password"
-                                    aria-describedby="password-requirements"
-                                    aria-invalid={Boolean(passwordIssue)}
-                                    className={cn(
-                                      "h-10 pl-10",
-                                      passwordIssue
-                                        ? "border-red-500 focus-visible:border-red-500 focus-visible:ring-red-500/20"
-                                        : password
-                                          ? "border-emerald-500 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
-                                          : ""
-                                    )}
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    required
-                                  />
-                                </div>
-                                <p id="password-requirements" className="text-xs text-muted-foreground">
-                                  Minimum {PASSWORD_MIN_LENGTH} characters, including a letter and a number.
-                                </p>
-                                {passwordIssue && (
-                                  <p className="text-xs text-red-500">{passwordIssue}</p>
-                                )}
+                            <div className="space-y-2">
+                              <Label htmlFor="password">Password *</Label>
+                              <div className="relative">
+                                <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                  id="password"
+                                  type={passwordVisible ? "text" : "password"}
+                                  autoComplete="new-password"
+                                  placeholder="Create a password"
+                                  aria-describedby="password-requirements"
+                                  aria-invalid={Boolean(passwordIssue)}
+                                  className={cn(
+                                    "h-10 pl-10 pr-10",
+                                    passwordIssue
+                                      ? "border-red-500 focus-visible:border-red-500 focus-visible:ring-red-500/20"
+                                      : password
+                                        ? "border-emerald-500 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
+                                        : ""
+                                  )}
+                                  value={password}
+                                  onChange={(e) => setPassword(e.target.value)}
+                                  required
+                                />
+                                <PasswordVisibilityToggle
+                                  visible={passwordVisible}
+                                  label="password"
+                                  onToggle={() => setPasswordVisible((visible) => !visible)}
+                                />
                               </div>
-                              <div className="space-y-2">
-                                <Label htmlFor="confirmPassword">Confirm Password *</Label>
-                                <div className="relative">
-                                  <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                                  <Input
-                                    id="confirmPassword"
-                                    type="password"
-                                    autoComplete="new-password"
-                                    placeholder="Re-enter password"
-                                    className={cn(
-                                      "h-10 pl-10",
-                                      confirmPassword && confirmPassword !== password
-                                        ? "border-red-500 focus-visible:border-red-500 focus-visible:ring-red-500/20"
-                                        : confirmPassword && confirmPassword === password
-                                          ? "border-emerald-500 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
-                                          : ""
-                                    )}
-                                    value={confirmPassword}
-                                    onChange={(e) => setConfirmPassword(e.target.value)}
-                                    required
-                                  />
-                                </div>
-                                {confirmPassword && confirmPassword !== password && (
-                                  <p className="text-xs text-red-500">Passwords do not match</p>
-                                )}
-                                {confirmPassword && confirmPassword === password && !passwordIssue && (
-                                  <p className="text-xs text-emerald-500">Passwords match</p>
-                                )}
-                              </div>
+                              <p id="password-requirements" className="text-xs text-muted-foreground">
+                                Minimum {PASSWORD_MIN_LENGTH} characters, including a letter and a number.
+                              </p>
+                              {passwordIssue && (
+                                <p className="text-xs text-red-500">{passwordIssue}</p>
+                              )}
                             </div>
 
                             <div className="rounded-lg bg-muted/50 p-4 text-sm leading-relaxed text-muted-foreground">
@@ -1161,12 +1363,7 @@ export default function UserRegisterPage() {
                         disabled={
                           submitting ||
                           catalogueError !== null ||
-                          !branch ||
-                          selectedCourseSlugs.length === 0 ||
-                          !presentStatus ||
-                          !parentMobile || parentMobile.length !== 10 ||
-                          !password || Boolean(passwordIssue) || password !== confirmPassword ||
-                          !agreeTerms || !signature
+                          !registrationReady
                         }
                       >
                         {submitting ? (

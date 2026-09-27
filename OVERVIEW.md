@@ -139,9 +139,7 @@ institution/
 
 | Route | Page | Description |
 |---|---|---|
-| `/auth/admin/login` | Login | Email + password, forgot password |
-| `/auth/admin/register` | Register | Admin registration |
-| `/auth/admin/reset-password` | Reset | Email-based password reset |
+| `/auth/admin/login` | Login | Uses `ADMIN_EMAIL` and `ADMIN_PASSWORD` from `.env.local`; provisions the Supabase admin account on first sign-in |
 
 ---
 

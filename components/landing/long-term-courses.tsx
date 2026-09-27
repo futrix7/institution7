@@ -41,6 +41,7 @@ function parseFees(fees: string, feeNumeric: number): number {
 export function LongTermCourses() {
   const [courses, setCourses] = useState<Course[]>([])
   const [loading, setLoading] = useState(true)
+  const [showSuggested, setShowSuggested] = useState(true)
 
   useEffect(() => {
     let active = true
@@ -68,6 +69,9 @@ export function LongTermCourses() {
     }
   }, [])
 
+  const suggestedCourses = courses.filter((course) => course.popular)
+  const visibleCourses = showSuggested ? suggestedCourses : courses
+
   return (
     <section id="courses" className="py-16 sm:py-24 bg-muted/20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -91,13 +95,47 @@ export function LongTermCourses() {
           </motion.h2>
         </div>
 
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="mt-6 flex flex-col items-center justify-between gap-3 rounded-2xl border border-primary/15 bg-gradient-to-r from-primary/8 via-background to-primary/5 p-4 sm:flex-row"
+        >
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Suggested for you</p>
+            <p className="mt-1 text-sm text-muted-foreground">Focused career tracks selected for faster placements and stronger outcomes.</p>
+          </div>
+          <div className="inline-flex rounded-full border border-border/70 bg-background p-1">
+            <button
+              type="button"
+              onClick={() => setShowSuggested(true)}
+              className={cn(
+                "rounded-full px-4 py-2 text-xs font-semibold transition-colors",
+                showSuggested ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Suggested
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSuggested(false)}
+              className={cn(
+                "rounded-full px-4 py-2 text-xs font-semibold transition-colors",
+                !showSuggested ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              All courses
+            </button>
+          </div>
+        </motion.div>
+
         {loading ? (
           <div className="mt-10 grid grid-cols-1 gap-4 sm:mt-12 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="h-56 animate-pulse rounded-2xl border border-border/60 bg-muted/50" />
             ))}
           </div>
-        ) : courses.length > 0 ? (
+        ) : visibleCourses.length > 0 ? (
           <motion.div
             variants={containerVariants}
             initial="hidden"
@@ -105,7 +143,7 @@ export function LongTermCourses() {
             viewport={{ once: true, margin: "-60px" }}
             className="mt-10 grid grid-cols-1 gap-4 sm:mt-12 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4"
           >
-            {courses.map((course) => {
+            {visibleCourses.map((course) => {
               const fee = parseFees(course.fees, course.fee_numeric)
               return (
                 <motion.div
@@ -120,7 +158,7 @@ export function LongTermCourses() {
                   {course.popular && (
                     <div className="mb-3 inline-flex items-center gap-1 self-start rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
                       <Star className="size-2.5 fill-current" />
-                      Popular
+                      {showSuggested ? "Suggested" : "Popular"}
                     </div>
                   )}
 
@@ -171,7 +209,9 @@ export function LongTermCourses() {
           </motion.div>
         ) : (
           <p className="mt-12 text-center text-sm text-muted-foreground">
-            Courses are being updated. Please contact us for the latest batch details.
+            {showSuggested
+              ? "Suggested courses are being updated. Please check all courses for the latest batch details."
+              : "Courses are being updated. Please contact us for the latest batch details."}
           </p>
         )}
 
